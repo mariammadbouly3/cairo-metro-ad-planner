@@ -104,14 +104,15 @@ def inject_style():
     <style>
     html, body, .stApp, [class*="st-"], button, input, textarea, select {{ font-family: '{FONT}', sans-serif !important; }}
     [data-testid="stIconMaterial"], .material-symbols-rounded, [class*="material-symbols"] {{ font-family: 'Material Symbols Rounded' !important; }}
-    .stApp {{ direction: rtl; {_bg_css()} }}
+    .stApp {{ {_bg_css()} }}
+    [data-testid="stMain"], [data-testid="stSidebarContent"], [data-testid="stHeader"] {{ direction: rtl; }}
     [data-testid="stHeader"] {{ background: rgba(8,12,28,.55); backdrop-filter: blur(10px); }}
-    [data-testid="stToolbar"], [data-testid="stDecoration"], [data-testid="stStatusWidget"] {{ display: none; }}
+    [data-testid="stDecoration"], [data-testid="stStatusWidget"], [data-testid="stMainMenu"], [data-testid="stAppDeployButton"] {{ display: none; }}
     .block-container {{ padding-top: 4.2rem; max-width: 1500px; }}
     h1, h2, h3, h4, p, label, li, .stMarkdown {{ text-align: right; }}
     /* sidebar */
     [data-testid="stSidebar"] > div:first-child {{ background: rgba(14,22,48,.94); border-left: 1px solid rgba(255,255,255,.12); }}
-    [data-testid="stSidebar"] * {{ direction: rtl; }}
+    [data-testid="stSidebarContent"] * {{ direction: rtl; }}
     /* top navigation */
     [data-testid="stTopNavLinkContainer"] a, [data-testid="stSidebarNavLink"] {{ border-radius: 999px; }}
     [data-testid="stTopNavLinkContainer"] a[aria-current="page"] {{ background: rgba(42,120,214,.85); }}
