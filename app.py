@@ -11,13 +11,19 @@ st.set_page_config(page_title="مخطط إعلانات مترو القاهرة",
                    initial_sidebar_state="collapsed")
 cm.inject_style()
 
+def page_file(name):
+    """Pages live in views/ on the laptop, but next to app.py in the GitHub repo. Support both."""
+    nested = cm.HERE / "views" / name
+    return str(nested if nested.exists() else cm.HERE / name)
+
+
 pages = [
-    st.Page("views/dashboard.py", title="لوحة المؤشرات", icon="📊", default=True),
-    st.Page("views/planner.py", title="خطّط واحجز", icon="📋"),
-    st.Page("views/network.py", title="شبكة المترو", icon="🗺️"),
-    st.Page("views/station.py", title="تفاصيل محطة", icon="🔎"),
-    st.Page("views/prices.py", title="الأسعار", icon="💰"),
-    st.Page("views/admin.py", title="الإدارة", icon="🔐"),
+    st.Page(page_file("dashboard.py"), title="لوحة المؤشرات", icon="📊", default=True),
+    st.Page(page_file("planner.py"), title="خطّط واحجز", icon="📋"),
+    st.Page(page_file("network.py"), title="شبكة المترو", icon="🗺️"),
+    st.Page(page_file("station.py"), title="تفاصيل محطة", icon="🔎"),
+    st.Page(page_file("prices.py"), title="الأسعار", icon="💰"),
+    st.Page(page_file("admin.py"), title="الإدارة", icon="🔐"),
 ]
 try:
     nav = st.navigation(pages, position="top")

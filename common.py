@@ -90,6 +90,8 @@ def html(markup: str):
 def _bg_css():
     p = HERE / "assets" / "bg.jpg"
     if not p.exists():
+        p = HERE / "bg.jpg"  # flat layout in the GitHub repo
+    if not p.exists():
         return f"background:{NAVY};"
     b64 = base64.b64encode(p.read_bytes()).decode()
     return (f"background: linear-gradient(rgba(8,12,28,.55), rgba(8,12,28,.82)), "
