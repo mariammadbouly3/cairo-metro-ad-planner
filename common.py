@@ -1,4 +1,4 @@
-"""Shared pieces for every page: Arabic labels, style, database connection and data loading."""
+"""Shared pieces for every page: language (Arabic/English), style, database connection and data loading."""
 from __future__ import annotations
 
 import base64
@@ -20,35 +20,109 @@ L1, L2, L3, INTER = "#2A78D6", "#E3572E", "#1B9E6B", "#6250D6"
 NAVY, INK, MUTED = "#0E1630", "#F3F5FA", "#AEB7C8"
 GOLD = "#F2C14E"
 LINE_COLORS = {"L1": L1, "L2": L2, "L3": L3}
-TIER_COLORS = {"مميزة": GOLD, "عالية": "#7FB3F0", "عادية": "#8E9AB3"}
 FONT = "Readex Pro"
 
-# ---------------------------------------------------------------- Arabic labels
-AR_TIER = {"Premium": "مميزة", "High": "عالية", "Standard": "عادية"}
-AR_AUD = {
-    "Students": "الطلاب",
-    "Upper-middle class": "الطبقة المتوسطة العليا",
-    "Office workers & shoppers": "الموظفون والمتسوقون",
-    "Commuters / intercity travellers": "الركاب اليوميون والمسافرون",
-    "Mass-market shoppers": "المتسوقون (السوق العام)",
-    "Tourists & visitors": "السياح والزوار",
-    "Local residents (mass market)": "سكان المنطقة",
+# ---------------------------------------------------------------- language
+def lang() -> str:
+    """'ar' or 'en'. Starts from ?lang= in the link (so each language has its own shareable URL)."""
+    if "lang" not in st.session_state:
+        st.session_state["lang"] = "en" if st.query_params.get("lang") == "en" else "ar"
+    return st.session_state["lang"]
+
+
+def is_ar() -> bool:
+    return lang() == "ar"
+
+
+def T(ar: str, en: str) -> str:
+    """Pick the text for the current language."""
+    return ar if is_ar() else en
+
+
+def set_lang(code: str):
+    st.session_state["lang"] = code
+    st.query_params["lang"] = code
+
+
+# (arabic, english) for every value that comes out of the database
+LABELS = {
+    "tier": {"Premium": ("مميزة", "Premium"), "High": ("عالية", "High"), "Standard": ("عادية", "Standard")},
+    "aud": {
+        "Students": ("الطلاب", "Students"),
+        "Upper-middle class": ("الطبقة المتوسطة العليا", "Upper-middle class"),
+        "Office workers & shoppers": ("الموظفون والمتسوقون", "Office workers & shoppers"),
+        "Commuters / intercity travellers": ("الركاب اليوميون والمسافرون", "Commuters & intercity travellers"),
+        "Mass-market shoppers": ("المتسوقون (السوق العام)", "Mass-market shoppers"),
+        "Tourists & visitors": ("السياح والزوار", "Tourists & visitors"),
+        "Local residents (mass market)": ("سكان المنطقة", "Local residents"),
+    },
+    "ind": {
+        "Telecom": ("الاتصالات", "Telecom"), "EdTech/courses": ("التعليم والكورسات", "EdTech & courses"),
+        "Fintech wallets": ("المحافظ الإلكترونية", "Fintech wallets"), "Banks": ("البنوك", "Banks"),
+        "Real estate": ("العقارات", "Real estate"), "Cars": ("السيارات", "Cars"),
+        "Government awareness": ("التوعية الحكومية", "Government awareness"), "FMCG": ("السلع الاستهلاكية", "FMCG"),
+        "Retail & fashion": ("الملابس والتجزئة", "Retail & fashion"), "Food delivery": ("توصيل الطعام", "Food delivery"),
+        "Ride-hailing": ("تطبيقات التوصيل", "Ride-hailing"), "Tourism & hospitality": ("السياحة والفنادق", "Tourism & hospitality"),
+        "Local retail": ("المحلات المحلية", "Local retail"),
+    },
+    "zone": {"platform": ("الرصيف", "Platform"), "concourse": ("صالة المحطة", "Concourse"),
+             "entrance": ("المدخل", "Entrance"), "stairs": ("السلالم", "Stairs"), "exit": ("المخرج", "Exit")},
+    "line": {"L1": ("الخط الأول", "Line 1"), "L2": ("الخط الثاني", "Line 2"), "L3": ("الخط الثالث", "Line 3")},
+    "type": {"underground": ("تحت الأرض", "Underground"), "elevated": ("علوية", "Elevated"), "surface": ("سطحية", "At grade")},
+    "area": {"CBD": ("وسط البلد / منطقة أعمال", "Downtown / CBD"), "Commercial": ("تجارية", "Commercial"),
+             "Upscale Residential": ("سكنية راقية", "Upscale residential"), "Dense Residential": ("سكنية مزدحمة", "Dense residential"),
+             "Suburban": ("أطراف المدينة", "Suburban"), "Industrial": ("صناعية", "Industrial")},
+    "gov": {"Cairo": ("القاهرة", "Cairo"), "Giza": ("الجيزة", "Giza"), "Qalyubia": ("القليوبية", "Qalyubia")},
+    "status": {"confirmed": ("مؤكد", "Confirmed"), "pending": ("في انتظار المراجعة", "Pending review"),
+               "cancelled": ("ملغي", "Cancelled")},
+    "basis": {"published": ("سعر سوق منشور", "Published market price"), "estimate": ("تقدير", "Estimate")},
+    "format": {
+        "platform wall": ("لوحة على الرصيف (3×4 م)", "Platform poster (3×4 m)"),
+        "billboard": ("لوحة كبيرة في صالة المحطة", "Concourse billboard"),
+        "digital screen": ("شاشة ديجيتال", "Digital screen"),
+        "ticket gate": ("إعلان على بوابات التذاكر", "Ticket-gate panel"),
+        "exterior wrap": ("تغليف واجهة المحطة", "Station exterior wrap"),
+        "corridor domination": ("السيطرة الكاملة على ممر", "Corridor domination"),
+        "stairs wrap": ("تغليف السلالم", "Stairs wrap"),
+        "sampling booth": ("بوث تجربة منتجات", "Sampling booth"),
+        "station naming rights": ("حق تسمية المحطة", "Station naming rights"),
+        "train interior": ("داخل القطار", "Train interior"),
+    },
 }
-AR_IND = {
-    "Telecom": "الاتصالات", "EdTech/courses": "التعليم والكورسات", "Fintech wallets": "المحافظ الإلكترونية",
-    "Banks": "البنوك", "Real estate": "العقارات", "Cars": "السيارات", "Government awareness": "التوعية الحكومية",
-    "FMCG": "السلع الاستهلاكية", "Retail & fashion": "الملابس والتجزئة", "Food delivery": "توصيل الطعام",
-    "Ride-hailing": "تطبيقات التوصيل", "Tourism & hospitality": "السياحة والفنادق", "Local retail": "المحلات المحلية",
-}
-AR_ZONE = {"platform": "الرصيف", "concourse": "صالة المحطة", "entrance": "المدخل", "stairs": "السلالم", "exit": "المخرج"}
-AR_LINE = {"L1": "الخط الأول", "L2": "الخط الثاني", "L3": "الخط الثالث"}
-AR_TYPE = {"underground": "تحت الأرض", "elevated": "علوية", "surface": "سطحية"}
-AR_AREA = {"CBD": "وسط البلد / منطقة أعمال", "Commercial": "تجارية", "Upscale Residential": "سكنية راقية",
-           "Dense Residential": "سكنية مزدحمة", "Suburban": "أطراف المدينة", "Industrial": "صناعية"}
-AR_GOV = {"Cairo": "القاهرة", "Giza": "الجيزة", "Qalyubia": "القليوبية"}
-AR_STATUS = {"confirmed": "مؤكد", "pending": "في انتظار المراجعة", "cancelled": "ملغي"}
-AR_BASIS = {"published": "سعر سوق منشور", "estimate": "تقدير"}
-MONTHS_AR = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"]
+MONTHS = {"ar": ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"],
+          "en": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]}
+
+
+def lbl(kind: str, key) -> str:
+    v = LABELS[kind].get(key)
+    if v is None:
+        return "" if key is None else str(key)
+    return v[0] if is_ar() else v[1]
+
+
+def month(i: int) -> str:
+    return MONTHS[lang()][i - 1]
+
+
+def lines_label(s) -> str:
+    return T(" و", " & ").join(lbl("line", x) for x in str(s).split("/"))
+
+
+def list_label(s, kind: str) -> str:
+    return T("، ", ", ").join(lbl(kind, x.strip()) for x in str(s).split(","))
+
+
+def tier_colors() -> dict:
+    return {lbl("tier", k): c for k, c in {"Premium": GOLD, "High": "#7FB3F0", "Standard": "#8E9AB3"}.items()}
+
+
+def line_colors() -> dict:
+    return {lbl("line", k): c for k, c in LINE_COLORS.items()}
+
+
+def y_side() -> str:
+    """Category labels sit on the reading side."""
+    return "right" if is_ar() else "left"
 
 
 CAIRO = ZoneInfo("Africa/Cairo")
@@ -63,21 +137,19 @@ def today():
     return now().date()
 
 
-def ar_lines(s):
-    return " و".join(AR_LINE.get(x, x) for x in str(s).split("/"))
-
-
-def ar_list(s, mapping):
-    return "، ".join(mapping.get(x.strip(), x.strip()) for x in str(s).split(","))
-
-
 def short_egp(x):
     x = float(x or 0)
+    if is_ar():
+        if x >= 1e6:
+            return f"{x / 1e6:,.2f} مليون جنيه"
+        if x >= 1e3:
+            return f"{x / 1e3:,.0f} ألف جنيه"
+        return f"{x:,.0f} جنيه"
     if x >= 1e6:
-        return f"{x / 1e6:,.2f} مليون جنيه"
+        return f"EGP {x / 1e6:,.2f}M"
     if x >= 1e3:
-        return f"{x / 1e3:,.0f} ألف جنيه"
-    return f"{x:,.0f} جنيه"
+        return f"EGP {x / 1e3:,.0f}K"
+    return f"EGP {x:,.0f}"
 
 
 # ---------------------------------------------------------------- style
@@ -99,20 +171,21 @@ def _bg_css():
 
 
 def inject_style():
+    d, a, side = ("rtl", "right", "left") if is_ar() else ("ltr", "left", "right")
     html(f"""
     <link href="https://fonts.googleapis.com/css2?family=Readex+Pro:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
     html, body, .stApp, [class*="st-"], button, input, textarea, select {{ font-family: '{FONT}', sans-serif !important; }}
     [data-testid="stIconMaterial"], .material-symbols-rounded, [class*="material-symbols"] {{ font-family: 'Material Symbols Rounded' !important; }}
     .stApp {{ {_bg_css()} }}
-    [data-testid="stMain"], [data-testid="stSidebarContent"], [data-testid="stHeader"] {{ direction: rtl; }}
+    [data-testid="stMain"], [data-testid="stSidebarContent"], [data-testid="stHeader"] {{ direction: {d}; }}
     [data-testid="stHeader"] {{ background: rgba(8,12,28,.55); backdrop-filter: blur(10px); }}
     [data-testid="stDecoration"], [data-testid="stStatusWidget"], [data-testid="stMainMenu"], [data-testid="stAppDeployButton"] {{ display: none; }}
     .block-container {{ padding-top: 4.2rem; max-width: 1500px; }}
-    h1, h2, h3, h4, p, label, li, .stMarkdown {{ text-align: right; }}
+    h1, h2, h3, h4, p, label, li, .stMarkdown {{ text-align: {a}; }}
     /* sidebar */
-    [data-testid="stSidebar"] > div:first-child {{ background: rgba(14,22,48,.94); border-left: 1px solid rgba(255,255,255,.12); }}
-    [data-testid="stSidebarContent"] * {{ direction: rtl; }}
+    [data-testid="stSidebar"] > div:first-child {{ background: rgba(14,22,48,.94); border-{side}: 1px solid rgba(255,255,255,.12); }}
+    [data-testid="stSidebarContent"] * {{ direction: {d}; }}
     /* top navigation */
     [data-testid="stTopNavLinkContainer"] a, [data-testid="stSidebarNavLink"] {{ border-radius: 999px; }}
     [data-testid="stTopNavLinkContainer"] a[aria-current="page"] {{ background: rgba(42,120,214,.85); }}
@@ -150,10 +223,11 @@ def inject_style():
     .kpi small {{ color: {MUTED}; font-size: .85rem; }}
     .kpi.accent {{ border-color: {GOLD}; }}
     .station-card h3 {{ margin: 0 0 .2rem; font-size: 1.6rem; }}
-    .chip {{ display:inline-block; padding:.15rem .7rem; border-radius:99px; font-size:.85rem; margin: 0 0 .3rem .3rem;
+    .chip {{ display:inline-block; padding:.15rem .7rem; border-radius:99px; font-size:.85rem; margin: 0 0 .3rem 0; margin-inline-end: .3rem;
              background: rgba(255,255,255,.12); }}
     .note {{ color:{MUTED}; font-size:.85rem; }}
     .live {{ display:inline-flex; align-items:center; gap:.4rem; color:{MUTED}; font-size:.85rem; }}
+    .langbtn button {{ min-width: 6.5rem; }}
     .live::before {{ content:""; width:8px; height:8px; border-radius:50%; background:{L3}; box-shadow:0 0 0 4px rgba(27,158,107,.25); }}
     /* phones */
     @media (max-width: 760px) {{
@@ -170,17 +244,26 @@ def inject_style():
 
 
 def header(title: str, subtitle: str = ""):
-    html(f"""
-    <div class="route">
-      <div class="bars">
-        <span style="width:90px;background:{L1}"></span>
-        <span style="width:60px;background:{L2}"></span>
-        <span style="width:80px;background:{L3}"></span>
-        <i>مترو القاهرة، 3 خطوط و84 محطة</i>
-      </div>
-      <h1>{title}</h1>
-      {f'<p>{subtitle}</p>' if subtitle else ''}
-    </div>""")
+    """Route-strip header plus the language switch."""
+    left, right = st.columns([7, 1], vertical_alignment="center")
+    with right:
+        other = "en" if is_ar() else "ar"
+        if st.button("English" if is_ar() else "العربية", key="lang_switch", use_container_width=True,
+                     help=T("Switch to English", "التحويل للعربي")):
+            set_lang(other)
+            st.rerun()
+    with left:
+        html(f"""
+        <div class="route">
+          <div class="bars">
+            <span style="width:90px;background:{L1}"></span>
+            <span style="width:60px;background:{L2}"></span>
+            <span style="width:80px;background:{L3}"></span>
+            <i>{T("مترو القاهرة، 3 خطوط و84 محطة", "Cairo Metro, 3 lines and 84 stations")}</i>
+          </div>
+          <h1>{title}</h1>
+          {f'<p>{subtitle}</p>' if subtitle else ''}
+        </div>""")
 
 
 def kpis(items, n=None, accent_first=False):
@@ -195,8 +278,9 @@ def style_fig(fig, height=None):
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         font=dict(family=FONT, color=INK, size=13), margin=dict(l=10, r=10, t=40, b=10),
-        legend=dict(orientation="h", y=1.1, x=1, xanchor="right", bgcolor="rgba(0,0,0,0)"),
-        hoverlabel=dict(font_family=FONT), title=dict(x=1, xanchor="right"),
+        legend=dict(orientation="h", y=1.1, x=1 if is_ar() else 0, xanchor="right" if is_ar() else "left",
+                    bgcolor="rgba(0,0,0,0)"),
+        hoverlabel=dict(font_family=FONT), title=dict(x=1 if is_ar() else 0, xanchor="right" if is_ar() else "left"),
     )
     if height:
         fig.update_layout(height=height)
@@ -240,13 +324,13 @@ def get_engine(url: str):
 def local_connect_form():
     """Only shown when no DATABASE_URL is configured (running on the laptop)."""
     with st.sidebar:
-        st.markdown("### 🔌 الاتصال بقاعدة البيانات")
-        host = st.text_input("الخادم", os.getenv("PGHOST", "localhost"))
-        port = st.text_input("المنفذ", os.getenv("PGPORT", "5432"))
-        db = st.text_input("قاعدة البيانات", os.getenv("PGDATABASE", "cairo_metro_db"))
-        user = st.text_input("اسم المستخدم", os.getenv("PGUSER", "postgres"))
-        pw = st.text_input("كلمة المرور", os.getenv("PGPASSWORD", ""), type="password")
-        if st.button("اتصال", type="primary", use_container_width=True):
+        st.markdown(T("### 🔌 الاتصال بقاعدة البيانات", "### 🔌 Connect to the database"))
+        host = st.text_input(T("الخادم", "Host"), os.getenv("PGHOST", "localhost"))
+        port = st.text_input(T("المنفذ", "Port"), os.getenv("PGPORT", "5432"))
+        db = st.text_input(T("قاعدة البيانات", "Database"), os.getenv("PGDATABASE", "cairo_metro_db"))
+        user = st.text_input(T("اسم المستخدم", "User"), os.getenv("PGUSER", "postgres"))
+        pw = st.text_input(T("كلمة المرور", "Password"), os.getenv("PGPASSWORD", ""), type="password")
+        if st.button(T("اتصال", "Connect"), type="primary", use_container_width=True):
             from urllib.parse import quote_plus
             st.session_state["local_url"] = f"postgresql://{quote_plus(user)}:{quote_plus(pw)}@{host}:{port}/{db}"
             st.rerun()
@@ -287,13 +371,10 @@ QUERIES = {
 }
 
 
-@st.cache_data(ttl=60, show_spinner="جاري تحميل البيانات...")
+@st.cache_data(ttl=60, show_spinner="...")
 def load_data(_eng, url_key: str):
     with _eng.connect() as c:
         out = {k: _floats(pd.read_sql(text(v), c)) for k, v in QUERIES.items()}
-    p = out["profile"]
-    p["tier_ar"] = p["tier"].map(AR_TIER)
-    p["lines_ar"] = p["lines"].map(ar_lines)
     for col in ("start_date", "end_date"):
         out["bookings"][col] = pd.to_datetime(out["bookings"][col])
         out["campaigns"][col] = pd.to_datetime(out["campaigns"][col])
@@ -301,8 +382,15 @@ def load_data(_eng, url_key: str):
 
 
 def data():
-    eng = engine()
-    return load_data(eng, str(hash(database_url())))
+    """Cached data plus display columns in the current language (*_l)."""
+    d = load_data(engine(), str(hash(database_url())))
+    p, sp, lo = d["profile"], d["spaces"], d["line_order"]
+    p["name_l"] = p["name_ar"] if is_ar() else p["name_en"]
+    p["tier_l"] = p["tier"].map(lambda x: lbl("tier", x))
+    p["lines_l"] = p["lines"].map(lines_label)
+    sp["format_l"] = sp["format_name"].map(lambda x: lbl("format", x))
+    lo["name_l"] = lo["name_ar"] if is_ar() else lo["name_en"]
+    return d
 
 
 def refresh():
