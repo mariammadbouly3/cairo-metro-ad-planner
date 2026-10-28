@@ -76,6 +76,29 @@ LABELS = {
     "status": {"confirmed": ("مؤكد", "Confirmed"), "pending": ("في انتظار المراجعة", "Pending review"),
                "cancelled": ("ملغي", "Cancelled")},
     "basis": {"published": ("سعر سوق منشور", "Published market price"), "estimate": ("تقدير", "Estimate")},
+    "sub_status": {"pending": ("الطلب وصل", "Request received"), "approved": ("اتوافق عليه", "Approved"),
+                   "shipped": ("الكارت في الطريق", "Card on the way"), "delivered": ("اتسلّم", "Delivered"),
+                   "cancelled": ("ملغي", "Cancelled")},
+    "plan": {"annual_2": ("سنوي - خطين", "Annual - 2 lines"), "annual_3": ("سنوي - الـ 3 خطوط", "Annual - all 3 lines")},
+    "district": {
+        "Abbassia": ("العباسية", "Abbassia"), "Ain Shams": ("عين شمس", "Ain Shams"),
+        "Al-Sayeda Zeinab": ("السيدة زينب", "Al-Sayeda Zeinab"), "Bab El-Shaaria": ("باب الشعرية", "Bab El-Shaaria"),
+        "Bulaq / Corniche": ("بولاق / الكورنيش", "Bulaq / Corniche"), "Dar El-Salam": ("دار السلام", "Dar El-Salam"),
+        "Downtown": ("وسط البلد", "Downtown"), "Downtown (Abdeen)": ("وسط البلد (عابدين)", "Downtown (Abdeen)"),
+        "Downtown (Attaba)": ("وسط البلد (العتبة)", "Downtown (Attaba)"), "Downtown (Tahrir)": ("وسط البلد (التحرير)", "Downtown (Tahrir)"),
+        "El-Maasara": ("المعصرة", "El-Maasara"), "El-Marg": ("المرج", "El-Marg"), "El-Matareyya": ("المطرية", "El-Matareyya"),
+        "El-Nozha": ("النزهة", "El-Nozha"), "El-Salam": ("السلام", "El-Salam"), "El-Waily": ("الوايلي", "El-Waily"),
+        "El-Zaher": ("الظاهر", "El-Zaher"), "El-Zaitoun": ("الزيتون", "El-Zaitoun"),
+        "Hadayek El-Qobba": ("حدائق القبة", "Hadayek El-Qobba"), "Heliopolis": ("مصر الجديدة", "Heliopolis"),
+        "Helwan": ("حلوان", "Helwan"), "Maadi": ("المعادي", "Maadi"), "Masr El-Qadima": ("مصر القديمة", "Masr El-Qadima"),
+        "Nasr City": ("مدينة نصر", "Nasr City"), "Ramses": ("رمسيس", "Ramses"), "Shubra": ("شبرا", "Shubra"),
+        "Tora": ("طرة", "Tora"), "Zamalek": ("الزمالك", "Zamalek"), "Zamalek / Gezira": ("الزمالك / الجزيرة", "Zamalek / Gezira"),
+        "Agouza": ("العجوزة", "Agouza"), "Boulak El-Dakrour": ("بولاق الدكرور", "Boulak El-Dakrour"), "Dokki": ("الدقي", "Dokki"),
+        "El-Mounib": ("المنيب", "El-Mounib"), "Faisal": ("فيصل", "Faisal"), "Giza": ("الجيزة", "Giza"),
+        "Giza / Bein El-Sarayat": ("الجيزة / بين السرايات", "Giza / Bein El-Sarayat"), "Giza Square": ("ميدان الجيزة", "Giza Square"),
+        "Imbaba": ("إمبابة", "Imbaba"), "Imbaba / Agouza": ("إمبابة / العجوزة", "Imbaba / Agouza"),
+        "Mohandessin": ("المهندسين", "Mohandessin"), "Shubra El-Kheima": ("شبرا الخيمة", "Shubra El-Kheima"),
+    },
     "format": {
         "platform wall": ("لوحة على الرصيف (3×4 م)", "Platform poster (3×4 m)"),
         "billboard": ("لوحة كبيرة في صالة المحطة", "Concourse billboard"),
@@ -356,9 +379,16 @@ def get_engine(url: str):
     eng = create_engine(url, pool_pre_ping=True, pool_recycle=300)
     with eng.connect() as c:
         c.execute(text("SELECT 1"))
-    import writes
-    writes.ensure_schema(eng)  # adds the contact columns for the request form, once per server start
     return eng
+
+
+SCHEMA_VERSION = 9  # bump when writes.ensure_schema learns something new, so a running server applies it too
+
+
+@st.cache_resource(show_spinner=False)
+def _schema_ready(url: str, version: int) -> bool:
+    import writes
+    return writes.ensure_schema(get_engine(url))
 
 
 def local_connect_form():
@@ -380,7 +410,9 @@ def engine():
     url = database_url()
     if not url:
         return None
-    return get_engine(url)
+    eng = get_engine(url)
+    _schema_ready(url, SCHEMA_VERSION)  # creates the subscriptions table and contact columns once
+    return eng
 
 
 def _floats(df):
@@ -411,10 +443,30 @@ QUERIES = {
 }
 
 
-@st.cache_data(ttl=60, show_spinner="...")
+# Annual subscription cards: only the columns the public pages need (no names, phones or addresses)
+OPTIONAL_QUERIES = {
+    "subscriptions": """SELECT subscription_id, home_station_id, work_station_id, plan, price_egp, start_date, status,
+                               is_demo, created_at
+                        FROM cairo_metro.subscriptions""",
+}
+# Published Cairo Metro annual subscription prices (EGP), by number of lines
+PLANS = {"annual_2": 4235, "annual_3": 5335}
+PLAN_SOURCE = ("https://www.egypttelegraph.com/article/100866/%D9%85%D9%86-300-%D8%A5%D9%84%D9%89-5-%D8%A2%D9%84%D8%A7%D9%81-"
+               "%D8%AC%D9%86%D9%8A%D9%87-%D8%A3%D8%B3%D8%B9%D8%A7%D8%B1")
+
+
+@st.cache_data(ttl=300, show_spinner="...")
 def load_data(_eng, url_key: str):
     with _eng.connect() as c:
         out = {k: _floats(pd.read_sql(text(v), c)) for k, v in QUERIES.items()}
+    for k, q in OPTIONAL_QUERIES.items():  # tables the app creates itself: never let them break the other pages
+        try:
+            with _eng.connect() as c:
+                out[k] = _floats(pd.read_sql(text(q), c))
+        except Exception:  # noqa: BLE001
+            out[k] = pd.DataFrame(columns=["subscription_id", "home_station_id", "work_station_id", "plan", "price_egp",
+                                           "start_date", "status", "is_demo", "created_at"])
+    out["subscriptions"]["start_date"] = pd.to_datetime(out["subscriptions"]["start_date"])
     for col in ("start_date", "end_date"):
         out["bookings"][col] = pd.to_datetime(out["bookings"][col])
         out["campaigns"][col] = pd.to_datetime(out["campaigns"][col])
@@ -438,11 +490,24 @@ def data():
     return d
 
 
-@st.cache_data(ttl=60, show_spinner=False)
+def fingerprint(d) -> tuple:
+    """A cheap summary that changes whenever bookings or prices change. Used as a cache key instead of whole tables."""
+    bk, sp = d["bookings"], d["spaces"]
+    return (len(bk), int(bk["booking_id"].max() or 0), (bk["status"] != "cancelled").sum(),
+            round(float(sp["monthly_price_egp"].sum())), int(sp["is_active"].astype(bool).sum()))
+
+
+@st.cache_data(ttl=3600, show_spinner=False, max_entries=8)
+def _daily(fp, _bk: pd.DataFrame) -> pd.DataFrame:
+    import models
+    return models.daily_bookings(active_bookings(_bk))
+
+
 def daily(bk: pd.DataFrame) -> pd.DataFrame:
     """Active bookings spread over the days they run (see models.daily_bookings)."""
-    import models
-    return models.daily_bookings(active_bookings(bk))
+    key = (len(bk), int(bk["booking_id"].max() or 0), int((bk["status"] != "cancelled").sum()),
+           round(float(bk["price_egp"].sum())))
+    return _daily(key, bk)
 
 
 def lines_short(s) -> str:
@@ -462,6 +527,10 @@ def go(page_name: str):
 def refresh():
     """Call after any write so every page shows the change straight away."""
     load_data.clear()
+
+
+def active_subs(subs):
+    return subs[subs["status"] != "cancelled"]
 
 
 def active_bookings(bk):

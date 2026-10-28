@@ -10,7 +10,7 @@ cm.header(T("لوحة المؤشرات", "Dashboard"),
             "Metro advertising revenue and occupancy, updated live from the database."))
 
 
-@st.fragment(run_every="60s")
+@st.fragment(run_every="300s")
 def live_dashboard():
     d = cm.data()
     profile, spaces, campaigns = d["profile"], d["spaces"], d["campaigns"]
@@ -19,7 +19,7 @@ def live_dashboard():
     EGP = T("جنيه", "EGP")
 
     t = f"{cm.now():%H:%M}"
-    cm.html(f'<span class="live">{T(f"آخر تحديث {t}، وبتتحدّث كل دقيقة", f"Last update {t}, refreshes every minute")}</span>')
+    cm.html(f'<span class="live">{T(f"آخر تحديث {t}، وبتتحدّث كل 5 دقايق", f"Last update {t}, refreshes every 5 minutes")}</span>')
 
     c1, c2 = st.columns([1, 3])
     with c1:

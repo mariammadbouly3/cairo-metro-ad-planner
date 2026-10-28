@@ -29,13 +29,14 @@ flowchart LR
 
 | Page | What it does |
 |---|---|
-| **Dashboard** | Revenue, today's occupancy, live campaigns, revenue by month, line, format, station and advertiser. Refreshes every minute. |
+| **Dashboard** | Revenue, today's occupancy, live campaigns, revenue by month, line, format, station and advertiser. Refreshes every 5 minutes. |
 | **Plan & book** | Pick industry, audience, budget and dates; a recommender picks the best *available* spaces, shows them on a map, and books them or downloads a **PDF quote** (Arabic or English). |
 | **Request a space** | Public form: choose a station and spaces, leave contact details; the request is held as *pending* for review. |
+| **Annual pass** | A rider requests an annual metro pass with a home address for delivery, sees the card, and tracks it (received → approved → on the way → delivered). Prices are the published 2025 tariff. |
 | **Insights** | Occupancy month by month, occupancy by format × station tier, spend by industry and advertiser, and the least-booked spaces with a suggested action. |
-| **Forecasts** | Revenue forecast for the next 3–12 months, and a demand model that explains what makes a space get booked. |
-| **Network** | All three lines and both Line 3 branches, stations sized by ad score. |
-| **Station** | One station's profile, audience, and the live status of each ad space. |
+| **Forecasts** | Revenue forecast for the next 3–12 months, a demand model that explains what makes a space get booked, and a **price simulator** (what happens to occupancy and revenue if prices change). |
+| **Network** | All three lines and both Line 3 branches, plus **K-means station segments** on a map, each with the advertisers it suits. |
+| **Station** | One station's profile and audience, a **booking calendar** (Gantt) showing what's free, and the live status of each ad space. |
 | **Prices** | Price range per format and the published source behind it. |
 | **Admin** | Password protected: approve or cancel bookings and requests, add campaigns, edit prices. |
 
@@ -47,13 +48,22 @@ flowchart LR
   purchasing power, format, zone, price and area type. Accuracy is **5-fold cross-validated** (R² ≈ 0.5), and
   **permutation importance** ranks the drivers. Spaces far below their prediction are flagged as under-performing;
   spaces far above it may support a higher price.
+- **Price simulator:** busy stations cost more *and* sell more, so an unconstrained model learned that higher prices
+  raise demand. Price is therefore a **monotonic feature** (a higher price can never increase predicted demand),
+  with about the same accuracy, so the model can answer "what if we cut digital-screen prices by 10%?".
+- **Station segments:** 11 standardised features per station, **K-means** (k = 5, chosen with the silhouette score),
+  groups named from their centres (interchange hubs, upscale, commercial & downtown, dense residential, city edge),
+  and a PCA view of how they separate.
 
 ## SQL
-- `01`–`04`, `06`–`08`: the schema built step by step: lines, stations, ad formats, spaces, advertisers, campaigns, bookings.
+- `01`–`04`, `06`–`09`: the schema built step by step: lines, stations, ad formats, spaces, advertisers, campaigns, bookings.
 - **No double bookings:** an `EXCLUDE USING gist` constraint on `(ad_space_id, daterange)` rejects overlapping bookings
   at database level; cancelled bookings free the space.
 - `05_sql_analysis.sql`: 17 business questions using CTEs and window functions (`ROW_NUMBER`, `RANK`, `LAG`, `NTILE`,
   running totals).
+- `09_subscriptions.sql`: annual pass requests, plus 1,200 simulated pass holders generated in SQL (weighted random
+  draws with window functions). Their home stations show where a **steady, repeat audience** lives: a pass holder
+  passes their home station's ads about 528 times a year.
 - `pbi_*` views feed Power BI directly from the cloud database.
 
 ## Stack
