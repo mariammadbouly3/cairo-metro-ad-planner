@@ -41,14 +41,14 @@ if st.button(T("خروج", "Sign out")):
 import verify  # noqa: E402
 
 if not verify.configured():
-    st.info(T("تأكيد الإيميل مش شغال لسه: ضيف SMTP_USER و SMTP_PASSWORD في الـ Secrets (شوف verify.py). "
-              "لحد ما تضيفهم، الحجوزات بتتبعت من غير تأكيد.",
-              "Email verification is off: add SMTP_USER and SMTP_PASSWORD to the app secrets (see verify.py). "
+    st.info(T("تأكيد الإيميل مش شغال لسه: ضيفي BREVO_API_KEY و EMAIL_FROM في الـ Secrets (شوف verify.py). "
+              "لحد ما تضيفيهم، الحجوزات بتتبعت من غير تأكيد.",
+              "Email verification is off: add BREVO_API_KEY and EMAIL_FROM to the app secrets (see verify.py). "
               "Until then, bookings are sent without verification."), icon="📧")
 else:
     with st.expander(T("📧 اختبار إرسال الإيميل", "📧 Test email sending")):
-        st.markdown(T("بيبعت إيميل تجريبي للإيميل اللي في SMTP_USER، ولو فشل بيقولك السبب.",
-                      "Sends a test email to the SMTP_USER address and tells you why if it fails."))
+        st.markdown(T(f"بيبعت إيميل تجريبي لـ {verify.sender()}، ولو فشل بيقولك السبب.",
+                      f"Sends a test email to {verify.sender()} and tells you why if it fails."))
         if st.button(T("ابعت إيميل تجريبي", "Send a test email")):
             why = verify.send_test()
             if why is None:

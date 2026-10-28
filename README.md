@@ -73,7 +73,7 @@ streamlit run app.py
 Without a `DATABASE_URL`, the sidebar asks for a local PostgreSQL password. To deploy:
 1. Create a free Neon database and run `00_cloud_setup.sql` once.
 2. On [share.streamlit.io](https://share.streamlit.io), pick this repo with `app.py` as the main file and add the secrets
-   `DATABASE_URL` and `ADMIN_PASSWORD`. For email verification add `SMTP_USER` and `SMTP_PASSWORD` (a Gmail app password).
+   `DATABASE_URL` and `ADMIN_PASSWORD`. For email verification add `BREVO_API_KEY` and `EMAIL_FROM` (Brevo free email API: Streamlit Cloud blocks SMTP).
 3. In Power BI: Get data → PostgreSQL → the Neon host, database `neondb`, then load the `cairo_metro.pbi_*` views.
 
 ## Data notes

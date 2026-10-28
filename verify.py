@@ -1,20 +1,24 @@
 """Email verification: send a 6-digit code, check it, and remember the verified address for this visit.
 
-Needs these app secrets (Streamlit Cloud → app → Settings → Secrets):
-    SMTP_USER = "you@gmail.com"          # the address the codes are sent from
-    SMTP_PASSWORD = "xxxx xxxx xxxx xxxx" # a Gmail *App password*, not the normal password
-Optional: SMTP_HOST (default smtp.gmail.com), SMTP_PORT (default 465).
-Without them, the forms still work and simply skip verification.
+Streamlit Community Cloud blocks outgoing SMTP (ports 465/587), so codes go through the Brevo email API over
+HTTPS (free: 300 emails a day). App secrets (Streamlit Cloud → app → Settings → Secrets):
+    BREVO_API_KEY = "xkeysib-..."        # Brevo → SMTP & API → API keys
+    EMAIL_FROM = "you@gmail.com"         # a sender you verified in Brevo → Senders
+SMTP_USER / SMTP_PASSWORD (Gmail app password) still work where SMTP isn't blocked, e.g. on a laptop.
+Without any of them, the forms still work and simply skip verification.
 """
 from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import re
 import secrets
 import smtplib
 import ssl
 import time
+import urllib.error
+import urllib.request
 from email.message import EmailMessage
 
 import streamlit as st
@@ -36,8 +40,35 @@ def _secret(name, default=None):
         return default
 
 
+def _brevo() -> bool:
+    return bool(_secret("BREVO_API_KEY") and _secret("EMAIL_FROM"))
+
+
 def configured() -> bool:
-    return bool(_secret("SMTP_USER") and _secret("SMTP_PASSWORD"))
+    return _brevo() or bool(_secret("SMTP_USER") and _secret("SMTP_PASSWORD"))
+
+
+def sender() -> str:
+    return str(_secret("EMAIL_FROM") or _secret("SMTP_USER") or "").strip()
+
+
+class BrevoError(Exception):
+    def __init__(self, status, body):
+        super().__init__(f"{status} {body}")
+        self.status, self.body = status, body
+
+
+def _send_brevo(to, subject, text, html):
+    payload = {"sender": {"name": "Cairo Metro Ad Planner", "email": sender()}, "to": [{"email": to}],
+               "subject": subject, "textContent": text, "htmlContent": html}
+    req = urllib.request.Request("https://api.brevo.com/v3/smtp/email", data=json.dumps(payload).encode(),
+                                 method="POST", headers={"api-key": str(_secret("BREVO_API_KEY")).strip(),
+                                                         "content-type": "application/json", "accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            r.read()
+    except urllib.error.HTTPError as e:
+        raise BrevoError(e.code, e.read().decode("utf-8", "ignore")[:300]) from None
 
 
 def _hash(email: str, code: str) -> str:
@@ -45,15 +76,11 @@ def _hash(email: str, code: str) -> str:
 
 
 def _send(to: str, code: str):
-    user = _secret("SMTP_USER")
-    msg = EmailMessage()
-    msg["Subject"] = f"{code} كود التأكيد · Your verification code"
-    msg["From"] = f"Cairo Metro Ad Planner <{user}>"
-    msg["To"] = to
-    msg.set_content(f"كود التأكيد بتاعك: {code}\nYour verification code: {code}\n\n"
-                    "الكود صالح لمدة 10 دقايق. لو مش انت اللي طلبته، تجاهل الرسالة دي.\n"
-                    "It works for 10 minutes. If you didn't ask for it, ignore this email.")
-    msg.add_alternative(f"""
+    subject = f"{code} كود التأكيد · Your verification code"
+    text = (f"كود التأكيد بتاعك: {code}\nYour verification code: {code}\n\n"
+            "الكود صالح لمدة 10 دقايق. لو مش انت اللي طلبته، تجاهل الرسالة دي.\n"
+            "It works for 10 minutes. If you didn't ask for it, ignore this email.")
+    html = f"""
     <div style="font-family:Arial,sans-serif;max-width:460px;margin:auto;padding:24px;border-radius:16px;
                 background:#0E1630;color:#F3F5FA">
       <div><span style="display:inline-block;width:60px;height:6px;border-radius:3px;background:#2A78D6"></span>
@@ -64,7 +91,15 @@ def _send(to: str, code: str):
       <p style="font-size:34px;letter-spacing:8px;font-weight:bold;margin:18px 0;color:#F2C14E">{code}</p>
       <p dir="rtl" style="color:#AEB7C8;font-size:14px">الكود صالح لمدة 10 دقايق. لو مش انت اللي طلبته، تجاهل الرسالة دي.</p>
       <p style="color:#AEB7C8;font-size:14px">This code works for 10 minutes. If you didn't ask for it, ignore this email.</p>
-    </div>""", subtype="html")
+    </div>"""
+    if _brevo():
+        _send_brevo(to, subject, text, html)
+        return
+    user = _secret("SMTP_USER")
+    msg = EmailMessage()
+    msg["Subject"], msg["From"], msg["To"] = subject, f"Cairo Metro Ad Planner <{user}>", to
+    msg.set_content(text)
+    msg.add_alternative(html, subtype="html")
     host = _secret("SMTP_HOST", "smtp.gmail.com")
     password = str(_secret("SMTP_PASSWORD")).replace(" ", "")  # Gmail shows app passwords in groups of 4
     port = int(_secret("SMTP_PORT", 465))
@@ -85,6 +120,20 @@ def _send(to: str, code: str):
 def explain(err: Exception) -> str:
     """A plain reason for a failed send, without any secret in it."""
     text = str(err)
+    if isinstance(err, BrevoError):
+        body = err.body.lower()
+        if err.status == 401 or "key not found" in body or "unauthorized" in body:
+            return T("Brevo رفض المفتاح: اتأكدي إن BREVO_API_KEY منسوخ كامل (بيبدأ بـ xkeysib-) ومن غير مسافات.",
+                     "Brevo refused the key: make sure BREVO_API_KEY is copied in full (starts with xkeysib-) with no spaces.")
+        if "sender" in body:
+            return T(f"Brevo مش معتبر {sender()} مرسل مؤكَّد: من Brevo ← Senders ضيفيه ودوسي على لينك التأكيد اللي يوصلك.",
+                     f"Brevo doesn't treat {sender()} as a verified sender: add it in Brevo → Senders and click the confirmation link.")
+        if "not yet activated" in body or "activate" in body or err.status == 403:
+            return T("حساب Brevo لسه محتاج تفعيل للإرسال (Transactional). افتحي Brevo وكمّلي خطوات التفعيل.",
+                     "The Brevo account still needs transactional sending activated. Open Brevo and finish the activation steps.")
+        return f"Brevo {err.status}: {err.body[:160]}"
+    if isinstance(err, urllib.error.URLError):
+        return T("مقدرناش نوصل لـ Brevo دلوقتي. جربي تاني بعد شوية.", "Couldn't reach Brevo right now. Try again shortly.")
     if isinstance(err, smtplib.SMTPAuthenticationError) or "535" in text or "534" in text:
         return T("Gmail رفض الدخول: SMTP_PASSWORD لازم يكون **App Password** (16 حرف) مش باسورد Gmail العادي، "
                  "و SMTP_USER لازم يكون نفس الإيميل اللي عملتي منه الـ App Password، و2-Step Verification مفعّل.",
@@ -93,15 +142,15 @@ def explain(err: Exception) -> str:
     if isinstance(err, smtplib.SMTPRecipientsRefused):
         return T("Gmail رفض عنوان المستلم. اتأكد من الإيميل.", "Gmail refused the recipient address. Check the email.")
     if isinstance(err, (TimeoutError, ConnectionError, OSError)):
-        return T("مقدرناش نوصل لسيرفر Gmail (الاتصال اتقفل أو خلص وقته).",
-                 "Couldn't reach the Gmail server (connection blocked or timed out).")
+        return T("مقدرناش نوصل لسيرفر Gmail: Streamlit Cloud بيقفل SMTP. استخدمي Brevo (BREVO_API_KEY و EMAIL_FROM).",
+                 "Couldn't reach the Gmail server: Streamlit Cloud blocks SMTP. Use Brevo (BREVO_API_KEY and EMAIL_FROM).")
     return f"{type(err).__name__}"
 
 
 def send_test() -> str | None:
-    """Admin check: send a test code to SMTP_USER. Returns None on success, else the reason."""
+    """Admin check: send a test code to the sender address. Returns None on success, else the reason."""
     try:
-        _send(str(_secret("SMTP_USER")).strip(), "123456")
+        _send(sender(), "123456")
         return None
     except Exception as e:  # noqa: BLE001
         return explain(e)
