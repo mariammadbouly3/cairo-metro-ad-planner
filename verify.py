@@ -65,10 +65,46 @@ def _send(to: str, code: str):
       <p dir="rtl" style="color:#AEB7C8;font-size:14px">الكود صالح لمدة 10 دقايق. لو مش انت اللي طلبته، تجاهل الرسالة دي.</p>
       <p style="color:#AEB7C8;font-size:14px">This code works for 10 minutes. If you didn't ask for it, ignore this email.</p>
     </div>""", subtype="html")
-    host, port = _secret("SMTP_HOST", "smtp.gmail.com"), int(_secret("SMTP_PORT", 465))
-    with smtplib.SMTP_SSL(host, port, context=ssl.create_default_context(), timeout=20) as s:
-        s.login(user, _secret("SMTP_PASSWORD"))
-        s.send_message(msg)
+    host = _secret("SMTP_HOST", "smtp.gmail.com")
+    password = str(_secret("SMTP_PASSWORD")).replace(" ", "")  # Gmail shows app passwords in groups of 4
+    port = int(_secret("SMTP_PORT", 465))
+    try:
+        with smtplib.SMTP_SSL(host, port, context=ssl.create_default_context(), timeout=20) as s:
+            s.login(str(user).strip(), password)
+            s.send_message(msg)
+    except smtplib.SMTPAuthenticationError:
+        raise
+    except (OSError, smtplib.SMTPException):
+        # some networks block port 465: try the other standard port (587 + STARTTLS)
+        with smtplib.SMTP(host, 587, timeout=20) as s:
+            s.starttls(context=ssl.create_default_context())
+            s.login(str(user).strip(), password)
+            s.send_message(msg)
+
+
+def explain(err: Exception) -> str:
+    """A plain reason for a failed send, without any secret in it."""
+    text = str(err)
+    if isinstance(err, smtplib.SMTPAuthenticationError) or "535" in text or "534" in text:
+        return T("Gmail رفض الدخول: SMTP_PASSWORD لازم يكون **App Password** (16 حرف) مش باسورد Gmail العادي، "
+                 "و SMTP_USER لازم يكون نفس الإيميل اللي عملتي منه الـ App Password، و2-Step Verification مفعّل.",
+                 "Gmail refused the login: SMTP_PASSWORD must be an **App password** (16 letters), not the normal "
+                 "Gmail password, SMTP_USER must be the account that created it, and 2-Step Verification must be on.")
+    if isinstance(err, smtplib.SMTPRecipientsRefused):
+        return T("Gmail رفض عنوان المستلم. اتأكد من الإيميل.", "Gmail refused the recipient address. Check the email.")
+    if isinstance(err, (TimeoutError, ConnectionError, OSError)):
+        return T("مقدرناش نوصل لسيرفر Gmail (الاتصال اتقفل أو خلص وقته).",
+                 "Couldn't reach the Gmail server (connection blocked or timed out).")
+    return f"{type(err).__name__}"
+
+
+def send_test() -> str | None:
+    """Admin check: send a test code to SMTP_USER. Returns None on success, else the reason."""
+    try:
+        _send(str(_secret("SMTP_USER")).strip(), "123456")
+        return None
+    except Exception as e:  # noqa: BLE001
+        return explain(e)
 
 
 def email_field(key: str, label: str, required: bool = True):
@@ -101,9 +137,8 @@ def email_field(key: str, label: str, required: bool = True):
             code = f"{secrets.randbelow(10 ** 6):06d}"
             try:
                 _send(email, code)
-            except Exception:  # noqa: BLE001
-                st.error(T("مقدرناش نبعت الإيميل دلوقتي. اتأكد من العنوان وجرب تاني.",
-                           "We couldn't send the email right now. Check the address and try again."))
+            except Exception as e:  # noqa: BLE001
+                st.error(T("مقدرناش نبعت الإيميل دلوقتي. ", "We couldn't send the email right now. ") + explain(e))
             else:
                 stt.update(hash=_hash(email, code), expires=time.time() + CODE_TTL, last=time.time(), tries=0,
                            sends=stt["sends"] + 1, sent_to=email.lower())

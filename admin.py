@@ -45,6 +45,17 @@ if not verify.configured():
               "لحد ما تضيفهم، الحجوزات بتتبعت من غير تأكيد.",
               "Email verification is off: add SMTP_USER and SMTP_PASSWORD to the app secrets (see verify.py). "
               "Until then, bookings are sent without verification."), icon="📧")
+else:
+    with st.expander(T("📧 اختبار إرسال الإيميل", "📧 Test email sending")):
+        st.markdown(T("بيبعت إيميل تجريبي للإيميل اللي في SMTP_USER، ولو فشل بيقولك السبب.",
+                      "Sends a test email to the SMTP_USER address and tells you why if it fails."))
+        if st.button(T("ابعت إيميل تجريبي", "Send a test email")):
+            why = verify.send_test()
+            if why is None:
+                st.success(T("اتبعت ✅ بص في الـ Inbox (أو الـ Spam). تأكيد الإيميل شغال.",
+                             "Sent ✅ Check the inbox (or spam). Email verification works."))
+            else:
+                st.error(why)
 
 eng = cm.engine()
 d = cm.data()
