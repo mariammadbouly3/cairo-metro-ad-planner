@@ -9,9 +9,11 @@ import streamlit as st
 import common as cm
 from common import T
 
-st.set_page_config(page_title=T("مخطط إعلانات مترو القاهرة", "Cairo Metro Ad Planner"), page_icon="🚇",
+ICON = next((str(p) for p in (cm.HERE / "assets" / "icon.png", cm.HERE / "icon.png") if p.exists()), "🚇")
+st.set_page_config(page_title=T("مخطط إعلانات مترو القاهرة", "Cairo Metro Ad Planner"), page_icon=ICON,
                    layout="wide", initial_sidebar_state="auto")
 cm.inject_style()
+cm.home_screen_icon()
 
 
 def page_file(name):
@@ -20,14 +22,22 @@ def page_file(name):
     return str(nested if nested.exists() else cm.HERE / name)
 
 
-pages = [
-    st.Page(page_file("dashboard.py"), title=T("لوحة المؤشرات", "Dashboard"), icon="📊", default=True),
-    st.Page(page_file("planner.py"), title=T("خطّط واحجز", "Plan & book"), icon="📋"),
-    st.Page(page_file("network.py"), title=T("شبكة المترو", "Network"), icon="🗺️"),
-    st.Page(page_file("station.py"), title=T("تفاصيل محطة", "Station"), icon="🔎"),
-    st.Page(page_file("prices.py"), title=T("الأسعار", "Prices"), icon="💰"),
-    st.Page(page_file("admin.py"), title=T("الإدارة", "Admin"), icon="🔐"),
+PAGE_LIST = [  # file, arabic title, english title, icon
+    ("dashboard.py", "لوحة المؤشرات", "Dashboard", "📊"),
+    ("planner.py", "خطّط واحجز", "Plan & book", "📋"),
+    ("request.py", "اطلب مكان", "Request a space", "🙋"),
+    ("insights.py", "تحليلات", "Insights", "🔬"),
+    ("forecast.py", "التوقعات", "Forecasts", "📈"),
+    ("network.py", "شبكة المترو", "Network", "🗺️"),
+    ("station.py", "تفاصيل محطة", "Station", "🔎"),
+    ("prices.py", "الأسعار", "Prices", "💰"),
+    ("admin.py", "الإدارة", "Admin", "🔐"),
 ]
+pages = []
+for i, (f, ar, en, icon) in enumerate(PAGE_LIST):
+    pg = st.Page(page_file(f), title=T(ar, en), icon=icon, default=i == 0)
+    cm.PAGES[f] = pg
+    pages.append(pg)
 try:
     nav = st.navigation(pages, position="top")
 except TypeError:  # older Streamlit without top navigation

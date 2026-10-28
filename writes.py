@@ -7,6 +7,27 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 
+SCHEMA_UPDATES = [
+    # 08_request_form.sql: contact details for bookings requested from the website (safe to run many times)
+    "ALTER TABLE cairo_metro.campaigns ADD COLUMN IF NOT EXISTS contact_name  VARCHAR(120)",
+    "ALTER TABLE cairo_metro.campaigns ADD COLUMN IF NOT EXISTS contact_phone VARCHAR(40)",
+    "ALTER TABLE cairo_metro.campaigns ADD COLUMN IF NOT EXISTS contact_email VARCHAR(160)",
+    "ALTER TABLE cairo_metro.campaigns ADD COLUMN IF NOT EXISTS notes         TEXT",
+    "ALTER TABLE cairo_metro.campaigns ADD COLUMN IF NOT EXISTS created_at    TIMESTAMPTZ DEFAULT now()",
+]
+
+
+def ensure_schema(eng) -> bool:
+    """Add the new columns if the database doesn't have them yet. Returns False if that isn't allowed."""
+    try:
+        with eng.begin() as conn:
+            for stmt in SCHEMA_UPDATES:
+                conn.execute(text(stmt))
+        return True
+    except Exception:  # noqa: BLE001  (read-only user: the app still works, just without contact details)
+        return False
+
+
 class BookingConflict(Exception):
     """One of the spaces was booked by someone else for overlapping dates."""
 
@@ -25,19 +46,30 @@ def get_or_create_advertiser(conn, company: str, industry: str) -> int:
 
 
 def book_plan(eng, company: str, industry: str, campaign_name: str, audience: str, budget: float,
-              start: dt.date, end: dt.date, items: list[tuple[int, float]], status: str = "pending") -> int:
-    """Create advertiser (if new) + campaign + one booking per space. Returns the campaign id."""
+              start: dt.date, end: dt.date, items: list[tuple[int, float]], status: str = "pending",
+              source: str = "web", contact: dict | None = None) -> int:
+    """Create advertiser (if new) + campaign + one booking per space. Returns the campaign id.
+    contact: optional {name, phone, email, notes} saved on the campaign (needs ensure_schema)."""
+    contact = {k: (v or "").strip() or None for k, v in (contact or {}).items()}
     try:
         with eng.begin() as conn:
             adv = get_or_create_advertiser(conn, company, industry)
-            cid = conn.execute(text(
-                "INSERT INTO cairo_metro.campaigns (advertiser_id, campaign_name, target_audience, start_date, end_date, budget_egp) "
-                "VALUES (:a, :n, :t, :s, :e, :b) RETURNING campaign_id"),
-                {"a": adv, "n": campaign_name.strip(), "t": audience, "s": start, "e": end, "b": budget}).scalar_one()
+            params = {"a": adv, "n": campaign_name.strip(), "t": audience, "s": start, "e": end, "b": budget}
+            if any(contact.values()):
+                params.update(cn=contact.get("name"), cp=contact.get("phone"), ce=contact.get("email"), no=contact.get("notes"))
+                cid = conn.execute(text(
+                    "INSERT INTO cairo_metro.campaigns (advertiser_id, campaign_name, target_audience, start_date, end_date, "
+                    "budget_egp, contact_name, contact_phone, contact_email, notes) "
+                    "VALUES (:a, :n, :t, :s, :e, :b, :cn, :cp, :ce, :no) RETURNING campaign_id"), params).scalar_one()
+            else:
+                cid = conn.execute(text(
+                    "INSERT INTO cairo_metro.campaigns (advertiser_id, campaign_name, target_audience, start_date, end_date, budget_egp) "
+                    "VALUES (:a, :n, :t, :s, :e, :b) RETURNING campaign_id"), params).scalar_one()
             conn.execute(text(
                 "INSERT INTO cairo_metro.bookings (campaign_id, ad_space_id, start_date, end_date, price_egp, status, source) "
-                "VALUES (:c, :sp, :s, :e, :p, :st, 'web')"),
-                [{"c": cid, "sp": int(sp), "s": start, "e": end, "p": float(price), "st": status} for sp, price in items])
+                "VALUES (:c, :sp, :s, :e, :p, :st, :src)"),
+                [{"c": cid, "sp": int(sp), "s": start, "e": end, "p": float(price), "st": status, "src": source}
+                 for sp, price in items])
         return cid
     except DBAPIError as err:
         if _is_overlap(err):

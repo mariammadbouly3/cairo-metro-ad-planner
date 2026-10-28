@@ -35,6 +35,10 @@ with st.container(border=True):
     cm.html(f"<p><b>{T('الجمهور:', 'Audience:')}</b> {cm.list_label(row['target_audience'], 'aud')}</p>"
             f"<p><b>{T('أنسب المعلنين:', 'Best advertisers:')}</b> {cm.list_label(row['best_advertisers'], 'ind')}</p>")
 
+if st.button(T("🙋 اطلب مكان في المحطة دي", "🙋 Request a space at this station"), type="primary"):
+    st.session_state["req_station"] = pick
+    cm.go("request.py")
+
 sp = spaces[spaces["station_id"] == pick].copy()
 today = pd.Timestamp(cm.today())
 now = bk[(bk["start_date"] <= today) & (bk["end_date"] >= today)]

@@ -243,6 +243,44 @@ def inject_style():
     </style>""")
 
 
+@st.cache_resource(show_spinner=False)
+def _icon_uri(path: str) -> str:
+    from io import BytesIO
+
+    from PIL import Image
+    buf = BytesIO()
+    Image.open(path).convert("RGB").resize((180, 180)).save(buf, "PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def home_screen_icon():
+    """Give phones a proper icon and colour when the site is added to the home screen.
+    Streamlit doesn't expose <head>, so a tiny invisible component adds the tags to the page around it."""
+    p = next((q for q in (HERE / "assets" / "icon.png", HERE / "icon.png") if q.exists()), None)
+    if p is None:
+        return
+    try:
+        import streamlit.components.v1 as components
+    except Exception:  # noqa: BLE001
+        return
+    uri = _icon_uri(str(p))
+    title = T("مترو إعلانات", "Metro Ads")
+    components.html(f"""<script>
+    for (const w of [window.parent, window.top]) {{
+      try {{
+        const h = w.document.head;
+        if (h.querySelector('link[data-metro]')) continue;
+        const add = (tag, attrs) => {{ const e = w.document.createElement(tag); Object.assign(e, attrs);
+                                      e.setAttribute('data-metro', '1'); h.appendChild(e); }};
+        add('link', {{rel: 'apple-touch-icon', href: '{uri}'}});
+        add('meta', {{name: 'theme-color', content: '{NAVY}'}});
+        add('meta', {{name: 'apple-mobile-web-app-title', content: '{title}'}});
+        add('meta', {{name: 'apple-mobile-web-app-capable', content: 'yes'}});
+      }} catch (e) {{}}
+    }}
+    </script>""", height=0)
+
+
 def header(title: str, subtitle: str = ""):
     """Route-strip header plus the language switch."""
     left, right = st.columns([7, 1], vertical_alignment="center")
@@ -318,6 +356,8 @@ def get_engine(url: str):
     eng = create_engine(url, pool_pre_ping=True, pool_recycle=300)
     with eng.connect() as c:
         c.execute(text("SELECT 1"))
+    import writes
+    writes.ensure_schema(eng)  # adds the contact columns for the request form, once per server start
     return eng
 
 
@@ -357,10 +397,10 @@ QUERIES = {
                         f.price_source, f.is_digital, a.zone, a.width_m, a.height_m, a.monthly_price_egp, a.is_active
                  FROM cairo_metro.ad_spaces a JOIN cairo_metro.ad_formats f USING (format_id)""",
     "bookings": """SELECT b.booking_id, b.ad_space_id, b.campaign_id, b.start_date, b.end_date, b.price_egp,
-                          COALESCE(b.status, 'confirmed') AS status, b.created_at
+                          COALESCE(b.status, 'confirmed') AS status, b.created_at, b.source
                    FROM cairo_metro.bookings b""",
-    "campaigns": """SELECT c.campaign_id, c.campaign_name, c.target_audience, c.start_date, c.end_date, c.budget_egp,
-                           a.advertiser_id, a.company_name, a.industry
+    # c.* so the optional contact columns come along when they exist
+    "campaigns": """SELECT c.*, a.company_name, a.industry
                     FROM cairo_metro.campaigns c JOIN cairo_metro.advertisers a USING (advertiser_id)""",
     "line_order": """SELECT l.line_number, ls.stop_order, ls.branch, s.station_id, s.name_en, s.name_ar,
                             s.latitude, s.longitude
@@ -378,6 +418,11 @@ def load_data(_eng, url_key: str):
     for col in ("start_date", "end_date"):
         out["bookings"][col] = pd.to_datetime(out["bookings"][col])
         out["campaigns"][col] = pd.to_datetime(out["campaigns"][col])
+    if "source" not in out["bookings"]:
+        out["bookings"]["source"] = "seed"
+    for col in ("contact_name", "contact_phone", "contact_email", "notes"):
+        if col not in out["campaigns"]:
+            out["campaigns"][col] = None
     return out
 
 
@@ -391,6 +436,27 @@ def data():
     sp["format_l"] = sp["format_name"].map(lambda x: lbl("format", x))
     lo["name_l"] = lo["name_ar"] if is_ar() else lo["name_en"]
     return d
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def daily(bk: pd.DataFrame) -> pd.DataFrame:
+    """Active bookings spread over the days they run (see models.daily_bookings)."""
+    import models
+    return models.daily_bookings(active_bookings(bk))
+
+
+def lines_short(s) -> str:
+    """Compact line label for tables and the PDF: 'خط 1 و 3' / 'L1, L3'."""
+    nums = [x.strip().lstrip("L") for x in str(s).split("/")]
+    return ("خط " + " و ".join(nums)) if is_ar() else ", ".join("L" + n for n in nums)
+
+
+PAGES = {}  # file name -> st.Page, filled by app.py so pages can link to each other
+
+
+def go(page_name: str):
+    if page_name in PAGES:
+        st.switch_page(PAGES[page_name])
 
 
 def refresh():

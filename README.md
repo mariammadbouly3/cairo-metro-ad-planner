@@ -1,49 +1,86 @@
-# 🚇 مخطط إعلانات مترو القاهرة · Cairo Metro Ad Planner
+# 🚇 Cairo Metro Ad Planner · مخطط إعلانات مترو القاهرة
 
-A bilingual (Arabic UI) web app on a PostgreSQL database of the 84 stations on Cairo Metro Lines 1–3.
-Advertisers plan a campaign, get the best **available** ad spaces for their audience and budget, and book it.
-Admins review bookings and edit prices. Every change shows up straight away on every page and in Power BI.
+**An end-to-end data project:** an Excel analysis of Cairo Metro's 84 stations became a PostgreSQL database, a live
+bilingual web app (Arabic / English) with machine-learning forecasts, and a Power BI dashboard, all reading the same
+cloud database.
 
-**Pages**
+**▶ Live app:** [Arabic](https://cairo-metro-ad-planner-mwzqpnn7ozdv8uubvti5wu.streamlit.app) ·
+[English](https://cairo-metro-ad-planner-mwzqpnn7ozdv8uubvti5wu.streamlit.app/?lang=en)
+
+---
+
+## The problem
+An advertiser with a budget wants to reach a specific audience on the metro. Which stations, which ad formats, and
+what will it cost? And the metro side wants to know: which spaces sell, which sit empty, and what revenue is coming next.
+
+## What I built
+
+```mermaid
+flowchart LR
+    A[Excel analysis<br/>84 stations, scores] --> B[(PostgreSQL<br/>Neon cloud)]
+    G[GTFS line order<br/>+ coordinates] --> B
+    P[Published Egyptian<br/>outdoor-ad prices] --> B
+    B --> C[Streamlit web app<br/>Arabic / English]
+    B --> D[Power BI dashboard]
+    C -- bookings, requests,<br/>price edits --> B
+    C --> E[scikit-learn<br/>forecast + demand model]
+    C --> F[PDF quotes]
+```
+
 | Page | What it does |
 |---|---|
-| لوحة المؤشرات (Dashboard) | Revenue, occupancy today, live campaigns, revenue by month, line, format, station and advertiser. Refreshes every minute. |
-| خطّط واحجز (Plan & book) | Industry → audience, budget, dates, lines, formats → recommended plan on a map, plus a one-click booking (saved as *pending*). |
-| شبكة المترو (Network) | All three lines with both Line 3 branches. Stations are sized by ad score. |
-| تفاصيل محطة (Station) | Profile, audience, best advertisers, and live availability of every ad space. |
-| الأسعار (Prices) | Price range per format, and the published source behind it. |
-| الإدارة (Admin) | Password protected: approve/cancel bookings, add campaigns and bookings, edit prices, switch spaces off. |
+| **Dashboard** | Revenue, today's occupancy, live campaigns, revenue by month, line, format, station and advertiser. Refreshes every minute. |
+| **Plan & book** | Pick industry, audience, budget and dates; a recommender picks the best *available* spaces, shows them on a map, and books them or downloads a **PDF quote** (Arabic or English). |
+| **Request a space** | Public form: choose a station and spaces, leave contact details; the request is held as *pending* for review. |
+| **Insights** | Occupancy month by month, occupancy by format × station tier, spend by industry and advertiser, and the least-booked spaces with a suggested action. |
+| **Forecasts** | Revenue forecast for the next 3–12 months, and a demand model that explains what makes a space get booked. |
+| **Network** | All three lines and both Line 3 branches, stations sized by ad score. |
+| **Station** | One station's profile, audience, and the live status of each ad space. |
+| **Prices** | Price range per format and the published source behind it. |
+| **Admin** | Password protected: approve or cancel bookings and requests, add campaigns, edit prices. |
+
+## Machine learning
+- **Revenue forecast:** ridge regression on trend + calendar-month seasonality. Revenue is counted in the months an ad
+  actually runs. Accuracy is checked with a **back-test** (the model is re-trained without the last 3 months and
+  scored on them), and the forecast shows an 80% range.
+- **Demand model:** gradient boosting predicts each space's 12-month occupancy from station riders, ad score,
+  purchasing power, format, zone, price and area type. Accuracy is **5-fold cross-validated** (R² ≈ 0.5), and
+  **permutation importance** ranks the drivers. Spaces far below their prediction are flagged as under-performing;
+  spaces far above it may support a higher price.
+
+## SQL
+- `01`–`04`, `06`–`08`: the schema built step by step: lines, stations, ad formats, spaces, advertisers, campaigns, bookings.
+- **No double bookings:** an `EXCLUDE USING gist` constraint on `(ad_space_id, daterange)` rejects overlapping bookings
+  at database level; cancelled bookings free the space.
+- `05_sql_analysis.sql`: 17 business questions using CTEs and window functions (`ROW_NUMBER`, `RANK`, `LAG`, `NTILE`,
+  running totals).
+- `pbi_*` views feed Power BI directly from the cloud database.
 
 ## Stack
-PostgreSQL (Neon in the cloud) · Python · pandas · SQLAlchemy · Streamlit · Plotly · Power BI
+PostgreSQL (Neon) · SQL · Python · pandas · SQLAlchemy · scikit-learn · Streamlit · Plotly · ReportLab · Power BI
 
-## Run on your laptop
+## Run it yourself
 ```bash
 pip install -r requirements.txt
 streamlit run app.py
 ```
-Or double-click `run_app.bat` on Windows. Without a `DATABASE_URL`, the sidebar asks for the local PostgreSQL password.
-
-## Deploy (free)
-1. **Database**: create a Neon project, then run `sql/00_cloud_setup.sql` once (in pgAdmin or the Neon SQL editor).
-2. **App**: on [share.streamlit.io](https://share.streamlit.io) choose this repo, set `app.py` as the main file, and add these secrets:
-   ```toml
-   DATABASE_URL = "postgresql://USER:PASSWORD@HOST/neondb?sslmode=require"
-   ADMIN_PASSWORD = "choose-a-password"
-   ```
-3. **Power BI**: Get data → PostgreSQL → server = Neon host, database = `neondb`. Load the `cairo_metro.pbi_*` views
-   and `station_ad_profile`, then use **Refresh** to pull the latest bookings.
-
-## Database
-`sql/01`–`06` build the schema step by step, and `sql/05_sql_analysis.sql` has 17 business questions
-(CTEs, window functions: ROW_NUMBER, LAG, RANK, NTILE, running totals).
-Bookings use an exclusion constraint, so the same ad space can never be double-booked. A cancelled booking frees the space.
+Without a `DATABASE_URL`, the sidebar asks for a local PostgreSQL password. To deploy:
+1. Create a free Neon database and run `00_cloud_setup.sql` once.
+2. On [share.streamlit.io](https://share.streamlit.io), pick this repo with `app.py` as the main file and add the secrets
+   `DATABASE_URL` and `ADMIN_PASSWORD`.
+3. In Power BI: Get data → PostgreSQL → the Neon host, database `neondb`, then load the `cairo_metro.pbi_*` views.
 
 ## Data notes
-- Station facts and ad scores: own analysis (`metro_ads_analysis.xlsx`). Daily footfall is an **estimate**.
-- Line order and coordinates: [Transport for Cairo Metro-GTFS](https://github.com/transportforcairo/Metro-GTFS) (CC BY-NC 4.0) and Wikipedia.
-- Prices: Cairo Metro does not publish its rate card. Each format is priced inside **published Egyptian outdoor-advertising
-  ranges** ([Entasher](https://entasher.com/Blog/190/Cost-of-billboard-advertising-in-Egypt-billboards-in-egypt-price),
-  [Alaanak 2025](https://alaanak.com/billboard-price-in-egypt-guide-digital-vs-traditional-options/)). Formats with no published
-  price are marked *estimate*.
-- The original advertisers, campaigns and bookings are **simulated**, and the company names are invented.
+- Station facts and ad scores: my own analysis. Daily ridership per station is an **estimate**.
+- Line order and coordinates: [Transport for Cairo Metro-GTFS](https://github.com/transportforcairo/Metro-GTFS)
+  (CC BY-NC 4.0) and Wikipedia.
+- Prices: Cairo Metro does not publish its rate card, so each format is priced inside **published Egyptian
+  outdoor-advertising ranges** ([Entasher](https://entasher.com/Blog/190/Cost-of-billboard-advertising-in-Egypt-billboards-in-egypt-price),
+  [Alaanak 2025](https://alaanak.com/billboard-price-in-egypt-guide-digital-vs-traditional-options/)). Formats with no
+  published price are marked *estimate*.
+- Advertisers, campaigns and bookings are **simulated** with invented company names, so the ML results show the
+  method, not real advice. This is a portfolio project, not an official Cairo Metro service.
+
+## Author
+**Mariam Madbouly** · Data Science graduate ·
+[LinkedIn](https://www.linkedin.com/in/mariam-madbouly-32b03a361)

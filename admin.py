@@ -48,7 +48,10 @@ BOOKING_COLS = {  # internal column -> displayed label
     "sel": T("اختيار", "Select"), "id": T("رقم الحجز", "Booking #"), "adv": T("المعلن", "Advertiser"),
     "camp": T("الحملة", "Campaign"), "station": T("المحطة", "Station"), "fmt": T("نوع الإعلان", "Format"),
     "from": T("من", "From"), "to": T("لحد", "To"), "value": T("القيمة", "Value"), "status": T("الحالة", "Status"),
+    "src": T("جه من", "Source"), "contact": T("التواصل", "Contact"), "notes": T("ملاحظات", "Notes"),
 }
+SOURCES = {"web": ("المخطط", "Planner"), "request": ("فورم الطلب", "Request form"), "admin": ("الإدارة", "Admin"),
+           "seed": ("بيانات تجريبية", "Demo data")}
 BOOKING_CFG = {k: st.column_config.Column(v) for k, v in BOOKING_COLS.items()}
 BOOKING_CFG["value"] = st.column_config.NumberColumn(BOOKING_COLS["value"], format="%d")
 BOOKING_CFG["sel"] = st.column_config.CheckboxColumn(BOOKING_COLS["sel"])
@@ -56,12 +59,17 @@ BOOKING_CFG["sel"] = st.column_config.CheckboxColumn(BOOKING_COLS["sel"])
 
 def booking_table(df):
     j = (df.merge(spaces[["ad_space_id", "station_id", "format_l"]], on="ad_space_id")
-           .merge(campaigns[["campaign_id", "campaign_name", "company_name"]], on="campaign_id"))
+           .merge(campaigns[["campaign_id", "campaign_name", "company_name", "contact_name", "contact_phone",
+                             "contact_email", "notes"]], on="campaign_id"))
+    contact = j[["contact_name", "contact_phone", "contact_email"]].apply(
+        lambda r: " · ".join(str(v) for v in r if pd.notna(v) and str(v).strip()), axis=1)
     return pd.DataFrame({
         "sel": False, "id": j["booking_id"], "adv": j["company_name"], "camp": j["campaign_name"],
         "station": j["station_id"].map(station_name), "fmt": j["format_l"],
         "from": j["start_date"].dt.date, "to": j["end_date"].dt.date, "value": j["price_egp"],
         "status": j["status"].map(lambda x: cm.lbl("status", x)),
+        "src": j["source"].map(lambda x: SOURCES.get(x, (x, x))[0 if cm.is_ar() else 1]),
+        "contact": contact, "notes": j["notes"].fillna(""),
     })
 
 

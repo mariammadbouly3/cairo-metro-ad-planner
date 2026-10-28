@@ -136,25 +136,46 @@ with st.expander(T("المخطط بيختار الأماكن إزاي؟", "How d
         "the budget per station.\n"
         "- Impressions = station daily riders × campaign days (each station counted once)."))
 
-# ---------------------------------------------------------------- booking
+# ---------------------------------------------------------------- quote + booking
 end = start + dt.timedelta(days=30 * months - 1)
-with st.form("book"):
-    st.markdown(T("#### احجز الخطة دي", "#### Book this plan"))
+with st.container(border=True):
+    st.markdown(T("#### عرض السعر والحجز", "#### Quote and booking"))
     cm.html('<p class="note">' + T(
-        f'هيتحجز {len(plan.spaces)} مكان من {start:%d/%m/%Y} لحد {end:%d/%m/%Y} بإجمالي {cm.short_egp(plan.total_cost)}. '
-        'الحجز بيتسجّل "في انتظار المراجعة" لحد ما الإدارة توافق عليه، والأماكن بتتقفل عليك من دلوقتي.',
-        f'This books {len(plan.spaces)} spaces from {start:%d/%m/%Y} to {end:%d/%m/%Y} for {cm.short_egp(plan.total_cost)}. '
-        'The booking is saved as "pending review" until an admin approves it, and the spaces are held for you right away.')
+        f'الخطة: {len(plan.spaces)} مكان من {start:%d/%m/%Y} لحد {end:%d/%m/%Y} بإجمالي {cm.short_egp(plan.total_cost)} قبل الضريبة. '
+        'نزّل عرض السعر PDF، أو احجز على طول: الحجز بيتسجّل "في انتظار المراجعة" والأماكن بتتقفل عليك من دلوقتي.',
+        f'The plan: {len(plan.spaces)} spaces from {start:%d/%m/%Y} to {end:%d/%m/%Y} for {cm.short_egp(plan.total_cost)} before VAT. '
+        'Download the PDF quote, or book straight away: the booking is saved as "pending review" and the spaces are held for you.')
         + "</p>")
-    f1, f2 = st.columns(2)
+    f1, f2, f3 = st.columns(3)
     company = f1.text_input(T("اسم الشركة", "Company name"))
     campaign_name = f2.text_input(T("اسم الحملة", "Campaign name"),
                                   value=T(f"حملة {cm.month(start.month)} {start.year}", f"{cm.month(start.month)} {start.year} campaign"))
-    ind_choice = f1.selectbox(T("المجال", "Industry"), list(INDUSTRY_AUDIENCE),
+    ind_choice = f3.selectbox(T("المجال", "Industry"), list(INDUSTRY_AUDIENCE),
                               index=list(INDUSTRY_AUDIENCE).index(industry) if industry in INDUSTRY_AUDIENCE else 0,
                               format_func=lambda x: cm.lbl("ind", x))
-    agree = f2.checkbox(T("راجعت الأماكن والأسعار وموافق على الحجز", "I reviewed the spaces and prices and agree to book"))
-    submitted = st.form_submit_button(T("احجز الخطة", "Book plan"), type="primary", use_container_width=True)
+    contact_name = f1.text_input(T("اسم المسؤول (اختياري)", "Contact person (optional)"))
+    phone = f2.text_input(T("رقم الموبايل (اختياري)", "Mobile number (optional)"), placeholder="01xxxxxxxxx")
+    email = f3.text_input(T("الإيميل (اختياري)", "Email (optional)"), placeholder="name@company.com")
+
+    aud_text = cm.list_label(", ".join(audiences), "aud") if audiences else T("كل الجماهير", "Everyone")
+    q_rows = [dict(station=r[NAME], lines=cm.lines_short(r["lines"]), format=cm.lbl("format", r["format_name"]),
+                   zone=cm.lbl("zone", r["zone"]), monthly=float(r["monthly_price_egp"]), months=months,
+                   total=float(r["cost"])) for _, r in plan.spaces.iterrows()]
+    q_meta = dict(company=company.strip(), campaign=campaign_name.strip(), start=start, end=end, audience=aud_text,
+                  impressions=float(plan.impressions), cpm=float(plan.cpm))
+    try:
+        import quote
+        pdf = quote.build_quote(q_rows, q_meta, ar=cm.is_ar())
+    except Exception as e:  # noqa: BLE001  (missing PDF libraries should never break the planner)
+        pdf = None
+        st.caption(T(f"عرض السعر PDF مش متاح دلوقتي: {e}", f"The PDF quote isn't available right now: {e}"))
+
+    agree = st.checkbox(T("راجعت الأماكن والأسعار وموافق على الحجز", "I reviewed the spaces and prices and agree to book"))
+    b1, b2 = st.columns(2)
+    if pdf:
+        b1.download_button(T("📄 تحميل عرض السعر (PDF)", "📄 Download quote (PDF)"), pdf, use_container_width=True,
+                           file_name=f"metro_quote_{start:%Y%m%d}.pdf", mime="application/pdf")
+    submitted = b2.button(T("احجز الخطة", "Book plan"), type="primary", use_container_width=True)
 
 if submitted:
     if not company.strip() or not campaign_name.strip():
@@ -166,7 +187,8 @@ if submitted:
         audience = ", ".join(audiences) if audiences else "All"
         try:
             cid = writes.book_plan(cm.engine(), company, ind_choice, campaign_name, audience, float(budget),
-                                   start, end, items, status="pending")
+                                   start, end, items, status="pending", source="web",
+                                   contact={"name": contact_name, "phone": phone, "email": email})
         except writes.BookingConflict:
             cm.refresh()
             st.error(T("مكان أو أكتر من الخطة اتحجز من حد تاني دلوقتي. حدّثت البيانات، اضغط احجز تاني على الخطة الجديدة.",
