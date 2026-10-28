@@ -26,6 +26,7 @@ PAGE_LIST = [  # file, arabic title, english title, icon
     ("dashboard.py", "لوحة المؤشرات", "Dashboard", "📊"),
     ("planner.py", "خطّط واحجز", "Plan & book", "📋"),
     ("request.py", "اطلب مكان", "Request a space", "🙋"),
+    ("subscribe.py", "اشتراك سنوي", "Annual pass", "🎫"),
     ("insights.py", "تحليلات", "Insights", "🔬"),
     ("forecast.py", "التوقعات", "Forecasts", "📈"),
     ("network.py", "شبكة المترو", "Network", "🗺️"),

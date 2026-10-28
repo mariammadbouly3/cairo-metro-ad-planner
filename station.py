@@ -17,6 +17,7 @@ other_name = "name_en" if cm.is_ar() else "name_ar"
 pick = st.selectbox(T("اختار المحطة", "Choose a station"), ordered.index.tolist(),
                     format_func=lambda i: f"{ordered.loc[i, 'name_l']} ({ordered.loc[i, other_name]})")
 row = ordered.loc[pick]
+n_subs = int((cm.active_subs(d["subscriptions"])["home_station_id"] == pick).sum())
 
 with st.container(border=True):
     cm.html(f"""
@@ -28,6 +29,7 @@ with st.container(border=True):
       <span class="chip">{cm.lbl('type', row['station_type'])}</span>
       <span class="chip">{row['district']}{T('، ', ', ')}{cm.lbl('gov', row['governorate'])}</span>
       <span class="chip">{T('افتتحت', 'Opened')} {int(row['opened_year'])}</span>
+      <span class="chip">🎫 {n_subs:,} {T('مشترك سنوي ساكن جنبها', 'annual pass holders live nearby')}</span>
     </div>""")
     cm.kpis([(f"#{int(row['rank'])}", T("الترتيب من 84 محطة", "Rank out of 84 stations")),
              (f"{row['ad_score']:.1f}", T("الدرجة الإعلانية من 100", "Ad score out of 100")),
@@ -63,3 +65,37 @@ with st.container(border=True):
         c_price: st.column_config.NumberColumn(format="%d"),
         c_rev: st.column_config.NumberColumn(format="%d"),
     })
+
+# ---------------------------------------------------------------- booking calendar
+import plotly.express as px  # noqa: E402
+
+with st.container(border=True):
+    st.markdown(T("#### تقويم الحجوزات", "#### Booking calendar"))
+    st.markdown(T("كل سطر مكان إعلاني، وكل شريط حجز. المسافات الفاضية هي فرص بيع.",
+                  "Each row is an ad space and each bar a booking. The gaps are what's left to sell."))
+    w_from, w_to = today - pd.Timedelta(days=30), today + pd.Timedelta(days=180)
+    cal = bk[bk["ad_space_id"].isin(sp["ad_space_id"]) & (bk["end_date"] >= w_from) & (bk["start_date"] <= w_to)]
+    cal = cal.merge(d["campaigns"][["campaign_id", "company_name"]], on="campaign_id", how="left")
+    labels = {r.ad_space_id: f"#{r.ad_space_id} {r.format_l}" for r in sp.itertuples()}
+    if cal.empty:
+        st.success(T("كل أماكن المحطة فاضية في الـ 6 شهور الجاية.", "Every space here is free for the next 6 months."))
+    else:
+        cal = cal.assign(space=cal["ad_space_id"].map(labels), status_l=cal["status"].map(lambda x: cm.lbl("status", x)),
+                         start=cal["start_date"].clip(lower=w_from), end=cal["end_date"].clip(upper=w_to) + pd.Timedelta(days=1))
+        gantt = px.timeline(cal, x_start="start", x_end="end", y="space", color="status_l", hover_name="company_name",
+                            hover_data={"start_date": "|%d/%m/%Y", "end_date": "|%d/%m/%Y", "price_egp": ":,.0f",
+                                        "start": False, "end": False, "space": False, "status_l": False},
+                            color_discrete_map={cm.lbl("status", "confirmed"): cm.L1, cm.lbl("status", "pending"): cm.GOLD},
+                            labels={"status_l": "", "space": "", "start_date": T("من", "From"), "end_date": T("لحد", "To"),
+                                    "price_egp": T("القيمة", "Value")},
+                            category_orders={"space": [labels[i] for i in sp["ad_space_id"]]})
+        gantt.add_vline(x=today, line=dict(color="#FFFFFF", width=1, dash="dot"))
+        gantt.update_xaxes(range=[w_from, w_to], tickformat="%d %b")
+        gantt.update_yaxes(side=cm.y_side(), autorange="reversed")
+        st.plotly_chart(cm.style_fig(gantt, max(220, 42 * len(sp) + 90)), use_container_width=True)
+        ahead = cal[(cal["end_date"] >= today) & (cal["start_date"] <= w_to)]
+        used = ((ahead["end_date"].clip(upper=w_to) - ahead["start_date"].clip(lower=today)).dt.days + 1).sum()
+        free_days = int(((w_to - today).days + 1) * len(sp) - used)
+        cm.html('<p class="note">' + T(f"الخط المنقط = النهارده. في الـ 6 شهور الجاية فيه حوالي {max(free_days, 0):,} يوم-مكان فاضي في المحطة دي.",
+                                       f"Dotted line = today. Over the next 6 months this station has about {max(free_days, 0):,} free space-days.")
+                + "</p>")

@@ -78,7 +78,8 @@ def editor(df, key):
                           disabled=[c for c in df.columns if c != "sel"], column_config=BOOKING_CFG)
 
 
-t_review, t_all, t_new, t_prices = st.tabs([
+t_subs, t_review, t_all, t_new, t_prices = st.tabs([
+    T("🎫 اشتراكات سنوية", "🎫 Annual passes"),
     T("📥 حجوزات للمراجعة", "📥 To review"), T("📚 كل الحجوزات", "📚 All bookings"),
     T("➕ حملة أو حجز جديد", "➕ New campaign or booking"), T("🏷️ الأسعار والأماكن", "🏷️ Prices & spaces")])
 
@@ -229,3 +230,52 @@ with t_prices:
         cm.refresh()
         st.success(T(f"اتحفظ {n} تعديل.", f"Saved {n} change(s)."))
         st.rerun()
+
+# ---------------------------------------------------------------- annual passes
+with t_subs:
+    try:
+        subs = writes.subscriptions_admin(eng)
+    except Exception:  # noqa: BLE001
+        subs = None
+        st.warning(T("جدول الاشتراكات لسه مش موجود. اعمل Reboot للتطبيق من Streamlit Cloud عشان يتعمل لوحده.",
+                     "The subscriptions table doesn't exist yet. Reboot the app on Streamlit Cloud and it is created automatically."))
+    if subs is not None:
+        f1, f2 = st.columns(2)
+        s_pick = f1.multiselect(T("الحالة", "Status"), ["pending", "approved", "shipped", "delivered", "cancelled"],
+                                default=["pending", "approved", "shipped"], format_func=lambda x: cm.lbl("sub_status", x))
+        show_demo = f2.checkbox(T("اعرض المشتركين التجريبيين كمان", "Also show the simulated subscribers"), value=False)
+        v = subs[subs["status"].isin(s_pick) & (show_demo | ~subs["is_demo"].astype(bool))].head(500)
+        n_new = int(((subs["status"] == "pending") & ~subs["is_demo"].astype(bool)).sum())
+        st.markdown(T(f"**{n_new}** طلب جديد مستني الموافقة. علّم على الطلبات وغيّر حالتها، ونزّل ملف التوصيل.",
+                      f"**{n_new}** new request(s) waiting for approval. Tick requests to move them along, and download the delivery list."))
+        table = pd.DataFrame({
+            "sel": False, "id": v["subscription_id"], "name": v["full_name"], "phone": v["phone"].fillna(""),
+            "area": v["district"].map(lambda x: cm.lbl("district", x) if pd.notna(x) else ""),
+            "address": v["address"].fillna(""), "home": v["home_station_id"].map(station_name),
+            "plan": v["plan"].map(lambda x: cm.lbl("plan", x)), "start": pd.to_datetime(v["start_date"]).dt.date,
+            "status": v["status"].map(lambda x: cm.lbl("sub_status", x)),
+        })
+        ed = st.data_editor(table, hide_index=True, use_container_width=True, key=f"subs_{L}",
+                            disabled=[c for c in table.columns if c != "sel"], column_config={
+                                "sel": st.column_config.CheckboxColumn(T("اختيار", "Select")),
+                                "id": st.column_config.Column(T("رقم", "No.")), "name": st.column_config.Column(T("الاسم", "Name")),
+                                "phone": st.column_config.Column(T("الموبايل", "Mobile")),
+                                "area": st.column_config.Column(T("المنطقة", "Area")),
+                                "address": st.column_config.Column(T("العنوان", "Address"), width="large"),
+                                "home": st.column_config.Column(T("محطة البيت", "Home station")),
+                                "plan": st.column_config.Column(T("الاشتراك", "Pass")),
+                                "start": st.column_config.Column(T("يبدأ", "Starts")),
+                                "status": st.column_config.Column(T("الحالة", "Status"))})
+        ids = ed.loc[ed["sel"], "id"].tolist()
+        b = st.columns(4)
+        for col, (status, label) in zip(b, (("approved", T("✅ موافقة", "✅ Approve")), ("shipped", T("🚚 اتشحن", "🚚 Shipped")),
+                                             ("delivered", T("📬 اتسلّم", "📬 Delivered")), ("cancelled", T("❌ إلغاء", "❌ Cancel")))):
+            if col.button(f"{label} ({len(ids)})", disabled=not ids, use_container_width=True, key=f"sub_{status}"):
+                writes.set_subscription_status(eng, ids, status)
+                cm.refresh()
+                st.rerun()
+        ship = subs[subs["status"].isin(["approved", "shipped"]) & ~subs["is_demo"].astype(bool)]
+        st.download_button(T(f"⬇️ قائمة التوصيل ({len(ship)} كارت)", f"⬇️ Delivery list ({len(ship)} cards)"),
+                           ship[["subscription_id", "full_name", "phone", "governorate", "district", "address", "plan"]]
+                           .to_csv(index=False).encode("utf-8-sig"), file_name=f"delivery_list_{cm.today()}.csv",
+                           mime="text/csv", disabled=ship.empty)
