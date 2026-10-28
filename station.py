@@ -17,7 +17,6 @@ other_name = "name_en" if cm.is_ar() else "name_ar"
 pick = st.selectbox(T("اختار المحطة", "Choose a station"), ordered.index.tolist(),
                     format_func=lambda i: f"{ordered.loc[i, 'name_l']} ({ordered.loc[i, other_name]})")
 row = ordered.loc[pick]
-n_subs = int((cm.active_subs(d["subscriptions"])["home_station_id"] == pick).sum())
 
 with st.container(border=True):
     cm.html(f"""
@@ -29,7 +28,6 @@ with st.container(border=True):
       <span class="chip">{cm.lbl('type', row['station_type'])}</span>
       <span class="chip">{row['district']}{T('، ', ', ')}{cm.lbl('gov', row['governorate'])}</span>
       <span class="chip">{T('افتتحت', 'Opened')} {int(row['opened_year'])}</span>
-      <span class="chip">🎫 {n_subs:,} {T('مشترك سنوي ساكن جنبها', 'annual pass holders live nearby')}</span>
     </div>""")
     cm.kpis([(f"#{int(row['rank'])}", T("الترتيب من 84 محطة", "Rank out of 84 stations")),
              (f"{row['ad_score']:.1f}", T("الدرجة الإعلانية من 100", "Ad score out of 100")),

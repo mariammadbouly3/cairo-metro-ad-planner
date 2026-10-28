@@ -5,6 +5,7 @@ import plotly.express as px
 import streamlit as st
 
 import common as cm
+import verify
 import writes
 from common import T
 from recommender import AUDIENCES, INDUSTRY_AUDIENCE, recommend
@@ -147,7 +148,7 @@ with st.container(border=True):
         'Download the PDF quote, or book straight away: the booking is saved as "pending review" and the spaces are held for you.')
         + "</p>")
     f1, f2, f3 = st.columns(3)
-    company = f1.text_input(T("اسم الشركة", "Company name"))
+    company = f1.text_input(T("اسم الشركة *", "Company name *"))
     campaign_name = f2.text_input(T("اسم الحملة", "Campaign name"),
                                   value=T(f"حملة {cm.month(start.month)} {start.year}", f"{cm.month(start.month)} {start.year} campaign"))
     ind_choice = f3.selectbox(T("المجال", "Industry"), list(INDUSTRY_AUDIENCE),
@@ -155,7 +156,7 @@ with st.container(border=True):
                               format_func=lambda x: cm.lbl("ind", x))
     contact_name = f1.text_input(T("اسم المسؤول (اختياري)", "Contact person (optional)"))
     phone = f2.text_input(T("رقم الموبايل (اختياري)", "Mobile number (optional)"), placeholder="01xxxxxxxxx")
-    email = f3.text_input(T("الإيميل (اختياري)", "Email (optional)"), placeholder="name@company.com")
+    email, email_ok = verify.email_field("plan", T("الإيميل * (لازم يتأكد قبل الحجز)", "Email * (verified before booking)"))
 
     aud_text = cm.list_label(", ".join(audiences), "aud") if audiences else T("كل الجماهير", "Everyone")
     q_rows = [dict(station=r[NAME], lines=cm.lines_short(r["lines"]), format=cm.lbl("format", r["format_name"]),
@@ -180,6 +181,11 @@ with st.container(border=True):
 if submitted:
     if not company.strip() or not campaign_name.strip():
         st.error(T("اكتب اسم الشركة واسم الحملة.", "Enter the company name and the campaign name."))
+    elif not email or not verify.EMAIL_RE.match(email):
+        st.error(T("اكتب إيميل صحيح.", "Enter a valid email."))
+    elif email_ok is False:
+        st.error(T("أكّد الإيميل الأول: دوس «ابعت كود التأكيد» واكتب الكود اللي وصلك.",
+                   "Verify the email first: press “Send code” and enter the code you receive."))
     elif not agree:
         st.error(T("علّم على خانة الموافقة الأول.", "Tick the agreement box first."))
     else:
@@ -188,7 +194,8 @@ if submitted:
         try:
             cid = writes.book_plan(cm.engine(), company, ind_choice, campaign_name, audience, float(budget),
                                    start, end, items, status="pending", source="web",
-                                   contact={"name": contact_name, "phone": phone, "email": email})
+                                   contact={"name": contact_name, "phone": phone, "email": email,
+                                            "verified": bool(email_ok)})
         except writes.BookingConflict:
             cm.refresh()
             st.error(T("مكان أو أكتر من الخطة اتحجز من حد تاني دلوقتي. حدّثت البيانات، اضغط احجز تاني على الخطة الجديدة.",

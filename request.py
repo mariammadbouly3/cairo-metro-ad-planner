@@ -5,6 +5,7 @@ import pandas as pd
 import streamlit as st
 
 import common as cm
+import verify
 import writes
 from common import T
 from recommender import INDUSTRY_AUDIENCE
@@ -71,7 +72,10 @@ with st.container(border=True):
              (f"{len(picked)}", T("مكان", "Spaces"))], accent_first=True)
 
 # ---------------------------------------------------------------- contact form
-EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+with st.container(border=True):
+    st.markdown(T("#### الإيميل", "#### Email"))
+    email, email_ok = verify.email_field("request", T("الإيميل *", "Email *"))
+
 with st.form("request"):
     st.markdown(T("#### بياناتك", "#### Your details"))
     f1, f2 = st.columns(2)
@@ -79,13 +83,12 @@ with st.form("request"):
     industry = f2.selectbox(T("المجال", "Industry"), list(INDUSTRY_AUDIENCE), format_func=lambda x: cm.lbl("ind", x))
     name = f1.text_input(T("اسم المسؤول *", "Contact person *"))
     phone = f2.text_input(T("رقم الموبايل", "Mobile number"), placeholder="01xxxxxxxxx")
-    email = f1.text_input(T("الإيميل", "Email"), placeholder="name@company.com")
-    campaign = f2.text_input(T("اسم الحملة", "Campaign name"),
+    campaign = f1.text_input(T("اسم الحملة", "Campaign name"),
                              value=T(f"حملة {cm.month(start.month)} {start.year}", f"{cm.month(start.month)} {start.year} campaign"))
     notes = st.text_area(T("ملاحظات (اختياري)", "Notes (optional)"), max_chars=500,
                          placeholder=T("مثلًا: محتاجين التركيب قبل رمضان", "e.g. we need it installed before Ramadan"))
-    cm.html('<p class="note">' + T("لازم رقم موبايل أو إيميل عشان نقدر نتواصل معاك. الطلب بيقفل الأماكن عليك لحد ما الإدارة تراجعه.",
-                                   "Give a mobile number or an email so we can reach you. The request holds the spaces "
+    cm.html('<p class="note">' + T("هنتواصل معاك على الإيميل اللي أكدته. الطلب بيقفل الأماكن عليك لحد ما الإدارة تراجعه.",
+                                   "We'll reach you at the email you verified. The request holds the spaces "
                                    "for you until the team reviews it.") + "</p>")
     sent = st.form_submit_button(T("ابعت الطلب", "Send request"), type="primary", use_container_width=True)
 
@@ -94,12 +97,15 @@ if sent:
     problems = []
     if not company.strip() or not name.strip():
         problems.append(T("اكتب اسم الشركة واسم المسؤول.", "Enter the company name and the contact person."))
-    if not digits and not (email or "").strip():
-        problems.append(T("اكتب رقم موبايل أو إيميل.", "Enter a mobile number or an email."))
+    if not email:
+        problems.append(T("اكتب الإيميل.", "Enter your email."))
+    elif not verify.EMAIL_RE.match(email):
+        problems.append(T("الإيميل شكله مش مظبوط.", "The email doesn't look right."))
+    elif email_ok is False:
+        problems.append(T("أكّد الإيميل الأول: دوس «ابعت كود التأكيد» واكتب الكود اللي وصلك.",
+                          "Verify the email first: press “Send code” and enter the code you receive."))
     if digits and not 8 <= len(digits) <= 15:
         problems.append(T("رقم الموبايل شكله مش مظبوط.", "The mobile number doesn't look right."))
-    if (email or "").strip() and not EMAIL.match(email.strip()):
-        problems.append(T("الإيميل شكله مش مظبوط.", "The email doesn't look right."))
     if not picked:
         problems.append(T("اختار مكان واحد على الأقل.", "Choose at least one space."))
     if problems:
@@ -110,7 +116,8 @@ if sent:
         try:
             cid = writes.book_plan(cm.engine(), company, industry, campaign or company, "Request form", total,
                                    start, end, items, status="pending", source="request",
-                                   contact={"name": name, "phone": phone, "email": email, "notes": notes})
+                                   contact={"name": name, "phone": phone, "email": email, "notes": notes,
+                                            "verified": bool(email_ok)})
         except writes.BookingConflict:
             cm.refresh()
             st.error(T("حد حجز مكان من دول دلوقتي. حدّثت الصفحة، اختار تاني وابعت.",

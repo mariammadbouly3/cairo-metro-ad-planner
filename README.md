@@ -31,8 +31,7 @@ flowchart LR
 |---|---|
 | **Dashboard** | Revenue, today's occupancy, live campaigns, revenue by month, line, format, station and advertiser. Refreshes every 5 minutes. |
 | **Plan & book** | Pick industry, audience, budget and dates; a recommender picks the best *available* spaces, shows them on a map, and books them or downloads a **PDF quote** (Arabic or English). |
-| **Request a space** | Public form: choose a station and spaces, leave contact details; the request is held as *pending* for review. |
-| **Annual pass** | A rider requests an annual metro pass with a home address for delivery, sees the card, and tracks it (received → approved → on the way → delivered). Prices are the published 2025 tariff. |
+| **Request a space** | Public form: choose a station and spaces, **verify your email with a 6-digit code**, and the request is held as *pending* for review. |
 | **Insights** | Occupancy month by month, occupancy by format × station tier, spend by industry and advertiser, and the least-booked spaces with a suggested action. |
 | **Forecasts** | Revenue forecast for the next 3–12 months, a demand model that explains what makes a space get booked, and a **price simulator** (what happens to occupancy and revenue if prices change). |
 | **Network** | All three lines and both Line 3 branches, plus **K-means station segments** on a map, each with the advertisers it suits. |
@@ -56,14 +55,11 @@ flowchart LR
   and a PCA view of how they separate.
 
 ## SQL
-- `01`–`04`, `06`–`09`: the schema built step by step: lines, stations, ad formats, spaces, advertisers, campaigns, bookings.
+- `01`–`04`, `06`–`08`: the schema built step by step: lines, stations, ad formats, spaces, advertisers, campaigns, bookings.
 - **No double bookings:** an `EXCLUDE USING gist` constraint on `(ad_space_id, daterange)` rejects overlapping bookings
   at database level; cancelled bookings free the space.
 - `05_sql_analysis.sql`: 17 business questions using CTEs and window functions (`ROW_NUMBER`, `RANK`, `LAG`, `NTILE`,
   running totals).
-- `09_subscriptions.sql`: annual pass requests, plus 1,200 simulated pass holders generated in SQL (weighted random
-  draws with window functions). Their home stations show where a **steady, repeat audience** lives: a pass holder
-  passes their home station's ads about 528 times a year.
 - `pbi_*` views feed Power BI directly from the cloud database.
 
 ## Stack
@@ -77,7 +73,7 @@ streamlit run app.py
 Without a `DATABASE_URL`, the sidebar asks for a local PostgreSQL password. To deploy:
 1. Create a free Neon database and run `00_cloud_setup.sql` once.
 2. On [share.streamlit.io](https://share.streamlit.io), pick this repo with `app.py` as the main file and add the secrets
-   `DATABASE_URL` and `ADMIN_PASSWORD`.
+   `DATABASE_URL` and `ADMIN_PASSWORD`. For email verification add `SMTP_USER` and `SMTP_PASSWORD` (a Gmail app password).
 3. In Power BI: Get data → PostgreSQL → the Neon host, database `neondb`, then load the `cairo_metro.pbi_*` views.
 
 ## Data notes

@@ -14,68 +14,14 @@ SCHEMA_UPDATES = [
     "ALTER TABLE cairo_metro.campaigns ADD COLUMN IF NOT EXISTS contact_email VARCHAR(160)",
     "ALTER TABLE cairo_metro.campaigns ADD COLUMN IF NOT EXISTS notes         TEXT",
     "ALTER TABLE cairo_metro.campaigns ADD COLUMN IF NOT EXISTS created_at    TIMESTAMPTZ DEFAULT now()",
+    "ALTER TABLE cairo_metro.campaigns ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE",
 ]
 
 
-SUBSCRIPTIONS_SQL = """
-CREATE TABLE IF NOT EXISTS cairo_metro.subscriptions (
-    subscription_id  SERIAL PRIMARY KEY,
-    full_name        VARCHAR(120) NOT NULL,
-    phone            VARCHAR(40),
-    governorate      VARCHAR(40),
-    district         VARCHAR(80),
-    address          TEXT,
-    home_station_id  INT NOT NULL REFERENCES cairo_metro.stations(station_id),
-    work_station_id  INT REFERENCES cairo_metro.stations(station_id),
-    plan             VARCHAR(12) NOT NULL CHECK (plan IN ('annual_2', 'annual_3')),
-    price_egp        NUMERIC(10,2) NOT NULL,
-    start_date       DATE NOT NULL,
-    status           VARCHAR(12) NOT NULL DEFAULT 'pending'
-                     CHECK (status IN ('pending', 'approved', 'shipped', 'delivered', 'cancelled')),
-    is_demo          BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS subscriptions_home_idx ON cairo_metro.subscriptions (home_station_id);
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM cairo_metro.subscriptions) THEN
-    PERFORM setseed(0.42);
-    WITH st AS (
-        SELECT station_id, governorate, district, avg_daily_riders::numeric AS riders,
-               CASE area_type WHEN 'Dense Residential' THEN 1.6 WHEN 'Upscale Residential' THEN 1.4
-                              WHEN 'Suburban' THEN 1.5 WHEN 'CBD' THEN 0.4 WHEN 'Commercial' THEN 0.7 ELSE 0.9 END AS home_w,
-               CASE area_type WHEN 'CBD' THEN 2.5 WHEN 'Commercial' THEN 1.8 WHEN 'Industrial' THEN 1.3 ELSE 0.6 END
-                 + CASE WHEN near_university THEN 1.0 ELSE 0 END AS work_w
-        FROM cairo_metro.station_ad_profile
-    ),
-    home AS (SELECT station_id, governorate, district,
-                    SUM(riders * home_w) OVER (ORDER BY station_id) / SUM(riders * home_w) OVER () AS cum FROM st),
-    work AS (SELECT station_id, SUM(riders * work_w) OVER (ORDER BY station_id) / SUM(riders * work_w) OVER () AS cum FROM st),
-    draws AS (SELECT g, random() AS u_home, random() AS u_work, random() AS u_plan, random() AS u_day, random() AS u_status
-              FROM generate_series(1, 1200) AS g)
-    INSERT INTO cairo_metro.subscriptions
-        (full_name, governorate, district, home_station_id, work_station_id, plan, price_egp, start_date, status, is_demo, created_at)
-    SELECT 'Demo rider ' || d.g, h.governorate, h.district, h.station_id,
-           NULLIF(w.station_id, h.station_id),
-           CASE WHEN d.u_plan < 0.72 THEN 'annual_2' ELSE 'annual_3' END,
-           CASE WHEN d.u_plan < 0.72 THEN 4235 ELSE 5335 END,
-           (CURRENT_DATE - (d.u_day * 365)::int),
-           CASE WHEN d.u_status < 0.90 THEN 'delivered' WHEN d.u_status < 0.95 THEN 'shipped'
-                WHEN d.u_status < 0.98 THEN 'approved' ELSE 'cancelled' END,
-           TRUE, now() - (d.u_day * 365 || ' days')::interval
-    FROM draws d
-    CROSS JOIN LATERAL (SELECT * FROM home WHERE home.cum >= d.u_home ORDER BY home.cum LIMIT 1) h
-    CROSS JOIN LATERAL (SELECT * FROM work WHERE work.cum >= d.u_work ORDER BY work.cum LIMIT 1) w;
-  END IF;
-END $$;
-"""
-
-
 def ensure_schema(eng) -> bool:
-    """Create what the newer pages need if the database doesn't have it yet (09_subscriptions.sql and
-    08_request_form.sql). Each step is separate, so one failing never blocks the others."""
+    """Add what the newer pages need if the database doesn't have it yet (08_request_form.sql)."""
     ok = True
-    for steps in (SCHEMA_UPDATES, [SUBSCRIPTIONS_SQL]):
+    for steps in (SCHEMA_UPDATES,):
         try:
             with eng.begin() as conn:
                 for stmt in steps:
@@ -83,51 +29,6 @@ def ensure_schema(eng) -> bool:
         except Exception:  # noqa: BLE001  (read-only user: the app still works without these)
             ok = False
     return ok
-
-
-# ---------------------------------------------------------------- annual subscription cards
-def add_subscription(eng, full_name: str, phone: str, governorate: str, district: str, address: str,
-                     home_station_id: int, work_station_id: int | None, plan: str, price: float,
-                     start: dt.date) -> int:
-    with eng.begin() as conn:
-        return conn.execute(text(
-            "INSERT INTO cairo_metro.subscriptions (full_name, phone, governorate, district, address, home_station_id, "
-            "work_station_id, plan, price_egp, start_date) "
-            "VALUES (:n, :p, :g, :d, :a, :h, :w, :pl, :pr, :s) RETURNING subscription_id"),
-            {"n": full_name.strip(), "p": phone.strip(), "g": governorate, "d": district, "a": address.strip(),
-             "h": int(home_station_id), "w": int(work_station_id) if work_station_id else None, "pl": plan,
-             "pr": float(price), "s": start}).scalar_one()
-
-
-def track_subscription(eng, subscription_id: int, phone: str):
-    """Status of one request, only when the phone number matches (so nobody can look up other people)."""
-    digits = "".join(ch for ch in phone if ch.isdigit())
-    with eng.connect() as conn:
-        row = conn.execute(text(
-            "SELECT subscription_id, full_name, plan, start_date, status, home_station_id, district, created_at, phone "
-            "FROM cairo_metro.subscriptions WHERE subscription_id = :i AND NOT is_demo"),
-            {"i": int(subscription_id)}).mappings().first()
-    if not row or "".join(ch for ch in (row["phone"] or "") if ch.isdigit()) != digits or not digits:
-        return None
-    return dict(row)
-
-
-def subscriptions_admin(eng):
-    """Full details for the admin page only."""
-    import pandas as pd
-    with eng.connect() as conn:
-        return pd.read_sql(text(
-            "SELECT subscription_id, full_name, phone, governorate, district, address, home_station_id, work_station_id, "
-            "plan, price_egp, start_date, status, is_demo, created_at FROM cairo_metro.subscriptions "
-            "ORDER BY is_demo, created_at DESC"), conn)
-
-
-def set_subscription_status(eng, ids: list[int], status: str) -> int:
-    if not ids:
-        return 0
-    with eng.begin() as conn:
-        return conn.execute(text("UPDATE cairo_metro.subscriptions SET status = :st WHERE subscription_id = ANY(:ids)"),
-                            {"st": status, "ids": [int(i) for i in ids]}).rowcount
 
 
 class BookingConflict(Exception):
@@ -152,17 +53,20 @@ def book_plan(eng, company: str, industry: str, campaign_name: str, audience: st
               source: str = "web", contact: dict | None = None) -> int:
     """Create advertiser (if new) + campaign + one booking per space. Returns the campaign id.
     contact: optional {name, phone, email, notes} saved on the campaign (needs ensure_schema)."""
-    contact = {k: (v or "").strip() or None for k, v in (contact or {}).items()}
+    contact = dict(contact or {})
+    verified = bool(contact.pop("verified", False))
+    contact = {k: (v or "").strip() or None for k, v in contact.items()}
     try:
         with eng.begin() as conn:
             adv = get_or_create_advertiser(conn, company, industry)
             params = {"a": adv, "n": campaign_name.strip(), "t": audience, "s": start, "e": end, "b": budget}
             if any(contact.values()):
-                params.update(cn=contact.get("name"), cp=contact.get("phone"), ce=contact.get("email"), no=contact.get("notes"))
+                params.update(cn=contact.get("name"), cp=contact.get("phone"), ce=contact.get("email"), no=contact.get("notes"),
+                              ev=verified)
                 cid = conn.execute(text(
                     "INSERT INTO cairo_metro.campaigns (advertiser_id, campaign_name, target_audience, start_date, end_date, "
-                    "budget_egp, contact_name, contact_phone, contact_email, notes) "
-                    "VALUES (:a, :n, :t, :s, :e, :b, :cn, :cp, :ce, :no) RETURNING campaign_id"), params).scalar_one()
+                    "budget_egp, contact_name, contact_phone, contact_email, notes, email_verified) "
+                    "VALUES (:a, :n, :t, :s, :e, :b, :cn, :cp, :ce, :no, :ev) RETURNING campaign_id"), params).scalar_one()
             else:
                 cid = conn.execute(text(
                     "INSERT INTO cairo_metro.campaigns (advertiser_id, campaign_name, target_audience, start_date, end_date, budget_egp) "
